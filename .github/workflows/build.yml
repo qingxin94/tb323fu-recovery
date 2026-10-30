@@ -1,0 +1,140 @@
+name: Build AERA Recovery for tb323fu
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+    - name: Checkout device tree
+      uses: actions/checkout@v4
+
+    - name: Download prebuilt binaries from Release
+      run: |
+        cd device/lenovo/tb323fu
+        # TODO: 首次编译前需在本仓库 Release 上传 prebuilt.tar.gz
+        # 内容应包含 prebuilt/kernel (从原厂 boot_a.img 提取的 Image)、dtb/、modules/、recovery/root/vendor/firmware_mnt/image/wcn7750/
+        curl -sL -o /tmp/tb323fu-prebuilt.tar.gz \
+          https://github.com/qingxin94/tb323fu-recovery/releases/download/prebuilt/tb323fu-prebuilt.tar.gz
+        tar xzf /tmp/tb323fu-prebuilt.tar.gz -C .
+        ls -la dtb/ prebuilt/ modules/ recovery/root/vendor/firmware_mnt/image/wcn7750/ | head -20
+        cd -
+
+    - name: Free disk space
+      run: |
+        echo "=== Before cleanup ==="
+        df -h /
+        # 清理不需要的大文件，释放根分区空间
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /usr/share/miniconda
+        sudo rm -rf /usr/local/julia*
+        sudo rm -rf /usr/local/rustup
+        sudo rm -rf /usr/local/go
+        sudo rm -rf /usr/share/kotlin
+        sudo rm -rf /usr/local/.ghcup
+        sudo rm -rf /usr/share/lua*
+        sudo rm -rf /usr/local/bundle
+        sudo rm -rf /opt/az
+        sudo rm -rf /usr/share/az*
+        sudo docker image prune --all --force || true
+        sudo docker system prune --all --force --volumes || true
+        echo "=== After cleanup ==="
+        df -h /
+
+    - name: Install dependencies
+      run: |
+        sudo apt update -y
+        sudo apt install -y git gnupg flex bison build-essential zip curl zlib1g-dev \
+          gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses-dev x11proto-core-dev \
+          libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
+          openjdk-17-jdk python3 python3-pip rsync python3-protobuf
+        sudo apt clean
+        sudo rm -rf /var/lib/apt/lists/*
+
+    - name: Create swap space
+      run: |
+        free -h
+        df -h /
+        # 16G swap（7G物理+3G自带+16G新增=26G，够soong bootstrap）
+        sudo dd if=/dev/zero of=/mnt/swapfile_extra bs=1M count=16384 status=none
+        sudo chmod 600 /mnt/swapfile_extra
+        sudo mkswap /mnt/swapfile_extra
+        sudo swapon /mnt/swapfile_extra
+        free -h
+        df -h /
+
+    - name: Install repo
+      run: |
+        mkdir -p ~/bin
+        curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
+        chmod +x ~/bin/repo
+        echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Configure git
+      run: |
+        git config --global user.email "builder@github.com"
+        git config --global user.name "GitHub Actions"
+
+    - name: Sync AERA source (on /mnt big volume)
+      run: |
+        # 源码同步到/mnt大卷（150GB），不占根分区
+        sudo mkdir -p /mnt/work
+        sudo chown $USER:$USER /mnt/work
+        cd /mnt/work
+        repo init -u https://github.com/AERA-Recovery/android_manifest.git -b aera-16.0 --depth=1
+        mkdir -p .repo/local_manifests
+        # AERA官方remove-minimal.xml（删601个项目）+ 自动过滤不存在的项目
+        curl -sL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
+          -o .repo/local_manifests/remove-minimal.xml
+        # 自动循环：报错就删掉不存在的remove-project再试
+        set -o pipefail
+        for i in $(seq 1 2000); do
+          echo "=== sync attempt $i ==="
+          if repo sync -c --force-sync --no-clone-bundle --no-tags -j4 > /tmp/sync.log 2>&1; then
+            echo "=== sync OK ==="
+            break
+          fi
+          bad=$(grep -oP 'remove-project (path|name)="[^"]*"' /tmp/sync.log | head -1 | sed 's/remove-project [a-z]*="//;s/"//')
+          if [ -z "$bad" ]; then
+            echo "=== sync failed, no remove-project error ==="
+            exit 1
+          fi
+          echo "=== removing non-existent: $bad ==="
+          sed -i "\|\"$bad\"|d" .repo/local_manifests/remove-minimal.xml
+        done
+        # 删掉所有 .git 目录，省 5-10GB 磁盘（--depth=1 后不再需要 git 历史）
+        find /mnt/work -name .git -type d -prune -exec rm -rf {} + 2>/dev/null || true
+        df -h /
+
+    - name: Copy device tree
+      run: |
+        mkdir -p /mnt/work/device/lenovo/tb323fu
+        cp -r device/lenovo/tb323fu/* /mnt/work/device/lenovo/tb323fu/
+
+    - name: Build recovery
+      run: |
+        cd /mnt/work
+        source build/envsetup.sh
+        lunch twrp_tb323fu-bp2a-eng
+        export SOONG_UI_MEMORY=4G
+        export GOMAXPROCS=2
+        export ANDROID_JAVA_OPTS="-Xmx4g -Xms1g"
+        export GOMEMLIMIT=12GiB
+        export GOGC=50
+        mka adbd recoveryimage -j2
+
+    - name: Upload recovery image
+      uses: actions/upload-artifact@v4
+      with:
+        name: tb323fu-recovery-img
+        path: /mnt/work/out/target/product/tb323fu/recovery.img
+        retention-days: 7
