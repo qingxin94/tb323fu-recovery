@@ -17,12 +17,12 @@ jobs:
     - name: Download prebuilt binaries from Release
       run: |
         cd device/lenovo/tb323fu
-        # TODO: 首次编译前需在本仓库 Release 上传 prebuilt.tar.gz
-        # 内容应包含 prebuilt/kernel (从原厂 boot_a.img 提取的 Image)、dtb/、modules/、recovery/root/vendor/firmware_mnt/image/wcn7750/
+        # prebuilt: kernel + dtb + 309 vendor ko modules (WiFi/BT firmware wcn7750 待补)
         curl -sL -o /tmp/tb323fu-prebuilt.tar.gz \
           https://github.com/qingxin94/tb323fu-recovery/releases/download/prebuilt/tb323fu-prebuilt.tar.gz
         tar xzf /tmp/tb323fu-prebuilt.tar.gz -C .
-        ls -la dtb/ prebuilt/ modules/ recovery/root/vendor/firmware_mnt/image/wcn7750/ | head -20
+        ls -la prebuilt/kernel dtb/dtb.img
+        echo "modules: $(ls modules/*.ko | wc -l) ko files"
         cd -
 
     - name: Free disk space
