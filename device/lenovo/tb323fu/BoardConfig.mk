@@ -188,6 +188,9 @@ AERA_POST_DECRYPT_MODULES := "smem-mailbox.ko cnss_prealloc.ko cnss_utils.ko cns
 # Input blacklist (exclude unwanted input devices)
 AERA_INPUT_BLACKLIST := "hbtp_vm:qcom-hv-haptics"
 
+# Root module kernel version (match official AERA pattern)
+AERA_ROOT_MODULE_KERNELS := 6.12
+
 # Support haptics feedback
 AERA_SUPPORT_INPUT_FF_HAPTICS := true
 AERA_SUPPORT_INPUT_AIDL_HAPTICS := true
