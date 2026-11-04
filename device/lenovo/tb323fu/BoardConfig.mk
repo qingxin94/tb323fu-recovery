@@ -197,11 +197,8 @@ AERA_NO_LEGACY_PROPS := true
 # Battery (AERA defaults to /sys/class/power_supply/battery; align with myron — no custom vars)
 AERA_BATTERY_SYSFS_WAIT_SECONDS := 5
 
-# USB
+# USB (match official AERA devices — no custom USB IDs, use defaults)
 AERA_EXCLUDE_DEFAULT_USB_INIT := true
-TARGET_RECOVERY_USB_VENDOR_ID := 0x22b8
-TARGET_RECOVERY_USB_PRODUCT_ID_ADB := 0x2e81
-TARGET_RECOVERY_USB_PRODUCT_ID_FASTBOOT := 0x2e80
 
 # ─── Misc ───
 TARGET_USES_LOGD := true
