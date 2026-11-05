@@ -26,5 +26,4 @@ PRODUCT_COPY_FILES += \
     $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_zap.mbn:recovery/root/system/etc/firmware/gen80000_zap.mbn \
     $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_gmu.bin:recovery/root/system/etc/firmware/gen80000_gmu.bin \
     $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_aqe.fw:recovery/root/system/etc/firmware/gen80000_aqe.fw \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_sqe.fw:recovery/root/system/etc/firmware/gen80000_sqe.fw \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/aw882xx_acf.bin:recovery/root/system/etc/firmware/aw882xx_acf.bin
+    $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_sqe.fw:recovery/root/system/etc/firmware/gen80000_sqe.fw

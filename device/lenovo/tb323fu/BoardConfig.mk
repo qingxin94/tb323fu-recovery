@@ -176,9 +176,10 @@ AERA_ENABLE_ALL_PARTITION_TOOLS := true
 AERA_USE_DMCTL := true
 AERA_DEFAULT_TIMEZONE := Asia/Shanghai
 
-# ─── Vendor modules (Novatek NT36523 touch + battery + full dependency chain) ───
-# ─── Vendor modules (从原厂 vendor ramdisk 提取, 共 309 个 ko) ───
-AERA_LOAD_VENDOR_MODULES := "cmd-db.ko icc-bcm-voter.ko icc-clk.ko icc-rpmh.ko clk-qcom.ko clk-rpmh.ko clk-scmi.ko pinctrl-msm.ko pinctrl-spmi-gpio.ko pinctrl-spmi-mpp.ko pinctrl-alor.ko pinctrl-canoe.ko qcom-scm.ko qcom-spmi-pmic.ko qcom-spmi-adc5-gen3.ko spmi-pmic-arb.ko rpmh-regulator.ko gdsc-regulator.ko qnoc-canoe.ko smem.ko qcom_aoss.ko msm_geni_serial.ko i2c-msm-geni.ko i2c-qcom-geni.ko spi-geni-qcom.ko spi-msm-geni.ko nvmem_qcom-spmi-sdam.ko nvmem_qfprom.ko qcom-ipcc.ko qcom-pdc.ko qcom_rpmh.ko qcom_glink.ko qcom_glink_smem.ko socinfo.ko panel_event_notifier.ko nvt_36xxx.ko haptic.ko qcom-hv-haptics.ko leds-qpnp-vibrator-ldo.ko dispcc-canoe.ko msm_drm.ko drm_display_helper.ko qcom-amoled-regulator.ko synx-driver.ko sync_fence.ko phy-qcom-ufs.ko phy-qcom-ufs-qmp-v4-canoe.ko ufs-qcom.ko ufshcd-crypto-qti.ko sdhci-msm.ko cqhci.ko bam_dma.ko dwc3-msm.ko phy-msm-m31-eusb2.ko phy-msm-ssusb-qmp.ko phy-qcom-eusb2-repeater.ko phy-qcom-m31-eusb2.ko usb_f_ccid.ko usb_f_cdev.ko usb_f_gsi.ko usb_f_qdss.ko usb_f_rndis.ko f_fs_ipc_log.ko qti_battery_charger.ko qti_battery_debug.ko qcom-spmi-temp-alarm.ko pm8941-pwrkey.ko qcom-pon.ko qcom-reboot-reason.ko cfg80211.ko mac80211.ko"
+# ─── Vendor modules (drivers not built into kernel, matching official AERA pattern) ───
+# Verified via kernel strings: pinctrl/I2C/SPMI/USB are built-in.
+# Not built-in: GPU, touch, WiFi, battery, haptic, audio, NFC.
+AERA_LOAD_VENDOR_MODULES := "msm_kgsl.ko panel_event_notifier.ko nvt_36xxx.ko cfg80211.ko qti_battery_charger.ko qti_battery_debug.ko haptic.ko qcom-hv-haptics.ko leds-qpnp-vibrator-ldo.ko swr_haptics_dlkm.ko nxp-nci.ko adsp_loader_dlkm.ko audio_pkt_dlkm.ko audio_prm_dlkm.ko lpass_cdc_dlkm.ko lpass_cdc_rx_macro_dlkm.ko lpass_cdc_tx_macro_dlkm.ko lpass_cdc_wsa_macro_dlkm.ko machine_dlkm.ko q6_dlkm.ko snd_event_dlkm.ko wcd_core_dlkm.ko wcd9xxx_dlkm.ko"
 AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 AERA_LOAD_PREBUILT_MODULES_AT_FIRST := true
 
