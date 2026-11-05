@@ -36,8 +36,12 @@ on fs
     mkdir /firmware 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
 
-    # Mount DSP firmware (audio)
+    # Mount entire vendor partition (for firmware, WiFi, etc.)
     mkdir /vendor 0755 root root
+    wait /dev/block/bootdevice/by-name/vendor${ro.boot.slot_suffix}
+    mount erofs /dev/block/bootdevice/by-name/vendor${ro.boot.slot_suffix} /vendor ro nosuid nodev
+
+    # Mount DSP firmware (audio)
     mkdir /vendor/dsp 0755 root root
     wait /dev/block/bootdevice/by-name/dsp
     mount ext4 /dev/block/bootdevice/by-name/dsp /vendor/dsp ro nosuid nodev
