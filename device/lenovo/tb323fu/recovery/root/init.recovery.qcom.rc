@@ -41,6 +41,27 @@ on fs
     wait /dev/block/bootdevice/by-name/vendor${ro.boot.slot_suffix}
     mount erofs /dev/block/bootdevice/by-name/vendor${ro.boot.slot_suffix} /vendor ro nosuid nodev
 
+    # Mount vendor_dlkm (modules)
+    mkdir /vendor_dlkm 0755 root root
+    wait /dev/block/bootdevice/by-name/vendor_dlkm${ro.boot.slot_suffix}
+    mount erofs /dev/block/bootdevice/by-name/vendor_dlkm${ro.boot.slot_suffix} /vendor_dlkm ro nosuid nodev
+
+    # Mount odm (device customizations)
+    mkdir /odm 0755 root root
+    wait /dev/block/bootdevice/by-name/odm${ro.boot.slot_suffix}
+    mount erofs /dev/block/bootdevice/by-name/odm${ro.boot.slot_suffix} /odm ro nosuid nodev
+
+    # Mount metadata
+    mkdir /metadata 0755 root root
+    wait /dev/block/bootdevice/by-name/metadata
+    mount f2fs /dev/block/bootdevice/by-name/metadata /metadata noatime nosuid nodev
+
+    # Mount prodpersist
+    mkdir /mnt/product 0755 root root
+    mkdir /mnt/product/persist 0755 root root
+    wait /dev/block/bootdevice/by-name/prodpersist
+    mount ext4 /dev/block/bootdevice/by-name/prodpersist /mnt/product/persist noatime nosuid nodev
+
     # Mount DSP firmware (audio)
     mkdir /vendor/dsp 0755 root root
     wait /dev/block/bootdevice/by-name/dsp
