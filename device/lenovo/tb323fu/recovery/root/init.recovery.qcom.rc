@@ -36,6 +36,14 @@ on fs
     mkdir /firmware 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
 
+    # One owner for the physical firmware mount, shared by ADSP and WLAN
+    # (same pattern as the official AERA qcom trees). request_firmware() and the
+    # WLAN driver look for /vendor/firmware_mnt/image, stock fstab mounts modem
+    # there, so we expose the same view over the real modem vfat mount.
+    # This is a real bind mount, NOT a symlink.
+    mkdir /vendor/firmware_mnt 0755 root root
+    mount none /firmware /vendor/firmware_mnt bind
+
     # NOTE: vendor / vendor_dlkm / odm are LOGICAL partitions living inside "super"
     # (fstab: ...logical,first_stage_mount). There is NO /dev/block/bootdevice/by-name/vendor
     # on this device, so mounting them here always fails AND blocks init for the wait
@@ -99,6 +107,11 @@ on property:twrp.modules.loaded=true
     write /sys/kernel/boot_adsp/ssr 1
     # Wait for battery path
     wait /sys/class/power_supply/battery
+
+    # Vibration + battery HALs are vendor services, they only come up after the
+    # vendor partition is visible (same as the official AERA qcom trees).
+    start vendor.qti.vibrator
+    start health-hal-2-1
 
 on property:servicemanager.ready=true
     setprop sys.boot_completed 1
