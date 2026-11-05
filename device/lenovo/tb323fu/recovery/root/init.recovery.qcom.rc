@@ -36,20 +36,13 @@ on fs
     mkdir /firmware 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
 
-    # Mount entire vendor partition (for firmware, WiFi, etc.)
-    mkdir /vendor 0755 root root
-    wait /dev/block/bootdevice/by-name/vendor${ro.boot.slot_suffix}
-    mount erofs /dev/block/bootdevice/by-name/vendor${ro.boot.slot_suffix} /vendor ro nosuid nodev
-
-    # Mount vendor_dlkm (modules)
-    mkdir /vendor_dlkm 0755 root root
-    wait /dev/block/bootdevice/by-name/vendor_dlkm${ro.boot.slot_suffix}
-    mount erofs /dev/block/bootdevice/by-name/vendor_dlkm${ro.boot.slot_suffix} /vendor_dlkm ro nosuid nodev
-
-    # Mount odm (device customizations)
-    mkdir /odm 0755 root root
-    wait /dev/block/bootdevice/by-name/odm${ro.boot.slot_suffix}
-    mount erofs /dev/block/bootdevice/by-name/odm${ro.boot.slot_suffix} /odm ro nosuid nodev
+    # NOTE: vendor / vendor_dlkm / odm are LOGICAL partitions living inside "super"
+    # (fstab: ...logical,first_stage_mount). There is NO /dev/block/bootdevice/by-name/vendor
+    # on this device, so mounting them here always fails AND blocks init for the wait
+    # timeout. Their firmware access is handled by the recovery framework via
+    # /dev/block/mapper/* when the user actually browses files.
+    # Essential firmware/config is instead shipped in the ramdisk:
+    #   recovery/root/vendor/firmware/  ->  /vendor/firmware/
 
     # Mount metadata
     mkdir /metadata 0755 root root

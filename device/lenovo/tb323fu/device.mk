@@ -18,12 +18,10 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # 跳过prebuilt page size检查（magiskboot 4096 vs 16384）
 PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false
 
-# Firmware files: copy to both vendor/firmware and system/etc/firmware
-# (nvt_36xxx.ko may look in either path)
-PRODUCT_COPY_FILES += \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/novatek_ts_fw.bin:recovery/root/system/etc/firmware/novatek_ts_fw.bin \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/novatek_ts_mp.bin:recovery/root/system/etc/firmware/novatek_ts_mp.bin \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_zap.mbn:recovery/root/system/etc/firmware/gen80000_zap.mbn \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_gmu.bin:recovery/root/system/etc/firmware/gen80000_gmu.bin \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_aqe.fw:recovery/root/system/etc/firmware/gen80000_aqe.fw \
-    $(DEVICE_PATH)/recovery/root/vendor/firmware/gen80000_sqe.fw:recovery/root/system/etc/firmware/gen80000_sqe.fw
+# Firmware files live ONLY at recovery/root/vendor/firmware/ -> ramdisk /vendor/firmware/
+# DO NOT add PRODUCT_COPY_FILES whose source is $(DEVICE_PATH)/recovery/root/...:
+#   soong resolves it as ../../recovery/root/... relative to build/soong/fsgen/
+#   -> "is outside of the source root" -> soong bootstrap fails before compiling.
+# AERA packs recovery/root/** into the recovery ramdisk automatically, so no copy rule is needed.
+# For a second search path (/system/etc/firmware), place real files under
+# recovery/root/system/etc/firmware/ instead of using a copy rule.
