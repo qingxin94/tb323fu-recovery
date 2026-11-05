@@ -36,6 +36,27 @@ on fs
     mkdir /firmware 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
 
+    # Mount DSP firmware (audio)
+    mkdir /vendor 0755 root root
+    mkdir /vendor/dsp 0755 root root
+    wait /dev/block/bootdevice/by-name/dsp
+    mount ext4 /dev/block/bootdevice/by-name/dsp /vendor/dsp ro nosuid nodev
+
+    # Mount Bluetooth firmware
+    mkdir /vendor/bt_firmware 0755 root root
+    wait /dev/block/bootdevice/by-name/bluetooth
+    mount ext4 /dev/block/bootdevice/by-name/bluetooth /vendor/bt_firmware ro nosuid nodev
+
+    # Mount FSG firmware
+    mkdir /vendor/fsg 0755 root root
+    wait /dev/block/bootdevice/by-name/fsg
+    mount ext4 /dev/block/bootdevice/by-name/fsg /vendor/fsg ro nosuid nodev
+
+    # Mount SOCCP firmware
+    mkdir /vendor/soccp_firmware 0755 root root
+    wait /dev/block/bootdevice/by-name/soccp
+    mount vfat /dev/block/bootdevice/by-name/soccp /vendor/soccp_firmware ro
+
     # Gatekeeper config for QTI TEE-based GK (not SPU-based)
     setprop vendor.gatekeeper.disable_spu true
     setprop vendor.gatekeeper.is_security_level_spu 0
