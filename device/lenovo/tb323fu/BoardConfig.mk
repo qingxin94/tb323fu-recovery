@@ -144,11 +144,11 @@ AERA_UI_ADAPTIVE_RESOLUTION := true
 TARGET_SYSTEM_PROP += $(DEVICE_PATH)/system.prop
 RECOVERY_SDCARD_ON_DATA := true
 
-# Screen: 横版平板 (landscape) — 物理分辨率待实测, 先按 landscape_hdpi
+# Screen: 横版平板 (landscape) — 物理分辨率 3040x1904
 AERA_THEME := landscape_hdpi
 AERA_FRAMERATE := 144
-TARGET_SCREEN_WIDTH  := 2560
-TARGET_SCREEN_HEIGHT := 1600
+TARGET_SCREEN_WIDTH  := 3040
+TARGET_SCREEN_HEIGHT := 1904
 AERA_BRIGHTNESS_PATH := "/sys/class/backlight/panel0-backlight/brightness"
 AERA_DEFAULT_BRIGHTNESS := 2048
 AERA_MAX_BRIGHTNESS := 4094
