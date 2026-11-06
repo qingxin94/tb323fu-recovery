@@ -89,14 +89,11 @@ jobs:
         cd /mnt/work
         repo init -u https://github.com/AERA-Recovery/android_manifest.git -b aera-16.0 --depth=1
         mkdir -p .repo/local_manifests
-        # 仓库里那份更狠的精简清单（remove-minimal2.xml），优先用它
-        if [ -f "$GITHUB_WORKSPACE/remove-minimal2.xml" ]; then
-          cp "$GITHUB_WORKSPACE/remove-minimal2.xml" .repo/local_manifests/remove-minimal.xml
-          echo "使用仓库自带的 remove-minimal2.xml"
-        else
-          curl -sL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
-            -o .repo/local_manifests/remove-minimal.xml
-        fi
+        # 用 AERA 官方 remove-minimal.xml（删 601 项）。
+        # 仓库自带 remove-minimal2.xml 会把 system/netd 一起删掉，
+        # dnsresolver_aidl_interface 缺 netd_event_listener_interface，ninja 在 29% 炸，不能用。
+        curl -sL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
+          -o .repo/local_manifests/remove-minimal.xml
         set -o pipefail
         for i in $(seq 1 2000); do
           echo "=== sync attempt $i ==="
@@ -126,6 +123,7 @@ jobs:
     - name: Build recovery
       run: |
         cd /mnt/work
+        set -o pipefail
         source build/envsetup.sh
         lunch twrp_tb323fu-bp2a-eng
         export SOONG_UI_MEMORY=4G
