@@ -55,3 +55,6 @@ PRODUCT_BUILD_PROP_OVERRIDES += \
 
 # Theme
 AERA_STATUS_ICONS_ALIGN := center
+
+# magiskboot 预编译 4K 对齐，Android16 要求 16K，跳过该检查
+PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false

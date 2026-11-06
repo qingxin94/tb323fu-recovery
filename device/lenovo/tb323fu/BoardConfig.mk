@@ -191,4 +191,3 @@ AERA_MAX_BRIGHTNESS := 4094
 AERA_DEFAULT_TIMEZONE := Asia/Shanghai
 
 # magiskboot 预编译为 4K 对齐，Android16 要求 16K，关闭该检查（check_elf_file 已给出的官方绕过方式）
-PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false
