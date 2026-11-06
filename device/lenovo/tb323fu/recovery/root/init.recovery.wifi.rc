@@ -1,55 +1,47 @@
-# AERA Wi-Fi startup for tb323fu (Lenovo Legion Y700 2025, SM8850/canoe).
-# Structure follows the official AERA qcom trees (froggerpro / dada):
-#   1. point firmware_class at the real modem image dir (no firmware copies)
-#   2. hand the firmware filesystem to the WLAN driver via fs_ready
-#   3. wait for wlan0, then start wpa_supplicant as AID_WIFI
-# Kernel-matched WLAN modules are staged from vendor_dlkm by the AERA loader.
+# init.recovery.wifi.rc — TB323FU (WCN7750)
+#
+# 照官方 macan 的写法（macan 与本机同为 WCN7750）：
+#   同一颗芯片不用 dodge 那种 CNSS2 PCIe 的 fs_ready 节点，而走 ICNSS/WPSS：
+#     /sys/kernel/icnss/wlan_en_delay  -> 1000
+#     /sys/kernel/icnss/wpss_boot      -> 1
+#   模块由 AERA 的 kernel_module_loader 从已装的 /vendor_dlkm 加载，ramdisk 里不放 20MB 的 ko。
+#
+# 依赖链（modules.dep 实测拓扑序，rfkill 必须最先，且它来自 system_dlkm 不在 vendor_dlkm）：
+#   rfkill -> qmi_helpers -> smem-mailbox -> wlan_firmware_service -> cnss_prealloc
+#   -> qcom_ramdump -> qcom_pdr_msg -> qcom_smd -> qcom_glink -> qcom_glink_smem
+#   -> rproc_qcom_common -> pdr_interface -> mhi -> pci-msm-drv -> pcie-pdc
+#   -> cnss_plat_ipc_qmi_svc -> cnss_utils -> cnss_nl -> cnss2 -> icnss2
+#   -> repeater -> redriver -> lenovo_kallsyms -> qti_pmic_glink -> ucsi_qti_glink
+#   -> dwc3-msm -> usb_f_gsi -> rmnet_mem -> qcom_va_minidump -> gsim -> ipam
+#   -> cfg80211 -> qca_cld3_wcn7750
+#
+# 固件在 WPSS 启动时才被需要，来自 pd-mapper 绑定后的 /vendor/firmware_mnt/image/wcn7750/
+# （wpss.mdt / bdwlan.bin）。所以顺序是：gatekeeper + aera-pd-mapper 先就绪 → 固件可见 → 再写 wpss_boot。
 
-on init
-    setprop wifi.driver.ready false
-
-on property:twrp.modules.loaded=true
-    setprop sys.aera.wlan.up 0
-    setprop wifi.driver.ready false
-
-    # request_firmware() must resolve to the real modem firmware image.
-    # /vendor/firmware_mnt is a real bind mount of the modem vfat partition.
-    write /sys/module/firmware_class/parameters/path /vendor/firmware_mnt/image
-
-    # Integrated WCN7750 path (icnss2). Harmless if this platform lacks it.
-    chmod 0222 /sys/bus/platform/drivers/icnss2/17010040.qcom,wcn7750/fs_ready
-    write /sys/bus/platform/drivers/icnss2/17010040.qcom,wcn7750/fs_ready 1
-    start aera-wlan-ready
-
-# Retry discovery without resetting an already running WPSS or supplicant.
 on property:post.decrypt.modules=true
     setprop sys.aera.wlan.up 0
-    chmod 0222 /sys/bus/platform/drivers/icnss2/17010040.qcom,wcn7750/fs_ready
-    write /sys/bus/platform/drivers/icnss2/17010040.qcom,wcn7750/fs_ready 1
+    # AERA 的模块装载器此时已把 post-decrypt 清单里的模块 insmod 完
+    write /sys/kernel/icnss/wlan_en_delay 1000
+    write /sys/kernel/icnss/wpss_boot 1
     start aera-wlan-ready
 
 on property:wifi.driver.ready=true
-    # Android wpa_supplicant drops to AID_WIFI before opening this directory.
-    mkdir /tmp/recovery 0770 root wifi
-    mkdir /tmp/recovery/sockets 0770 wifi wifi
+    mkdir /tmp/recovery 0777 root root
+    mkdir /tmp/recovery/sockets 0777 root root
     start wpa_supplicant
 
 on property:sys.aera.wlan.up=1 && property:wifi.driver.ready=true
     setprop sys.aera.wlan.up 0
-    mkdir /tmp/recovery 0770 root wifi
-    mkdir /tmp/recovery/sockets 0770 wifi wifi
     start wpa_supplicant
 
-service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
+service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
     disabled
-    user root
-    group root inet net_admin net_raw
     seclabel u:r:recovery:s0
 
-service aera-wlan-ready /system/bin/sh -c "echo 'AERA Wi-Fi: waiting for wlan0' > /dev/kmsg; n=0; until test -e /sys/class/net/wlan0; do if test $$n -ge 60; then echo 'AERA Wi-Fi: wlan0 missing after 60 seconds' > /dev/kmsg; exit 1; fi; sleep 1; n=$$((n + 1)); done; echo 'AERA Wi-Fi: wlan0 ready' > /dev/kmsg; setprop wifi.driver.ready true"
-    disabled
-    oneshot
-    timeout_period 60
+# macan 同款：wlan0 出现后要在驱动 idle shutdown（约 250ms）之前把接口抢过来
+service aera-wlan-ready /system/bin/sh /system/bin/aera-wlan-ready.sh
     user root
     group root
+    disabled
+    oneshot
     seclabel u:r:recovery:s0

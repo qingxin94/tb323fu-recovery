@@ -3,10 +3,14 @@ name: Build AERA Recovery for tb323fu
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'device/lenovo/tb323fu/**'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 jobs:
   build:
+    # 机器资源设定保持原样：4 核 / 16GB 免费 runner，不清洗
     runs-on: ubuntu-22.04
     timeout-minutes: 240
 
@@ -14,16 +18,10 @@ jobs:
     - name: Checkout device tree
       uses: actions/checkout@v4
 
-    - name: Download prebuilt binaries from Release
-      run: |
-        cd device/lenovo/tb323fu
-        # prebuilt: kernel + dtb + 309 vendor ko modules (WiFi/BT firmware wcn7750 待补)
-        curl -sL -o /tmp/tb323fu-prebuilt.tar.gz \
-          https://github.com/qingxin94/tb323fu-recovery/releases/download/prebuilt/tb323fu-prebuilt.tar.gz
-        tar xzf /tmp/tb323fu-prebuilt.tar.gz -C .
-        ls -la prebuilt/kernel dtb/dtb.img
-        echo "modules: $(ls modules/*.ko | wc -l) ko files"
-        cd -
+    # 原第 2 步「Download prebuilt binaries from Release」已删除：
+    # 本设备树自带 prebuilt/kernel（39MB，md5 e3e00158eb5b842270c37322780709ba，与原厂 boot.img 内核一致）
+    # 与 22 个内核模块（recovery/root/lib/modules/），不再拉别人那份 23.6MB 包，
+    # 也避免它覆盖我们的模块清单（它那份 309 个 ko 缺 qca_cld3_wcn7750）。
 
     - name: Free disk space
       run: |
@@ -56,7 +54,7 @@ jobs:
         sudo apt install -y git gnupg flex bison build-essential zip curl zlib1g-dev \
           gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses-dev x11proto-core-dev \
           libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
-          openjdk-17-jdk python3 python3-pip rsync python3-protobuf
+          openjdk-17-jdk python3 python3-pip rsync python3-protobuf lz4
         sudo apt clean
         sudo rm -rf /var/lib/apt/lists/*
 
@@ -64,7 +62,6 @@ jobs:
       run: |
         free -h
         df -h /
-        # 16G swap（7G物理+3G自带+16G新增=26G，够soong bootstrap）
         sudo dd if=/dev/zero of=/mnt/swapfile_extra bs=1M count=16384 status=none
         sudo chmod 600 /mnt/swapfile_extra
         sudo mkswap /mnt/swapfile_extra
@@ -86,16 +83,20 @@ jobs:
 
     - name: Sync AERA source (on /mnt big volume)
       run: |
-        # 源码同步到/mnt大卷（150GB），不占根分区
+        # 源码同步到 /mnt 大卷，不占根分区
         sudo mkdir -p /mnt/work
         sudo chown $USER:$USER /mnt/work
         cd /mnt/work
         repo init -u https://github.com/AERA-Recovery/android_manifest.git -b aera-16.0 --depth=1
         mkdir -p .repo/local_manifests
-        # AERA官方remove-minimal.xml（删601个项目）+ 自动过滤不存在的项目
-        curl -sL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
-          -o .repo/local_manifests/remove-minimal.xml
-        # 自动循环：报错就删掉不存在的remove-project再试
+        # 仓库里那份更狠的精简清单（remove-minimal2.xml），优先用它
+        if [ -f "$GITHUB_WORKSPACE/remove-minimal2.xml" ]; then
+          cp "$GITHUB_WORKSPACE/remove-minimal2.xml" .repo/local_manifests/remove-minimal.xml
+          echo "使用仓库自带的 remove-minimal2.xml"
+        else
+          curl -sL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
+            -o .repo/local_manifests/remove-minimal.xml
+        fi
         set -o pipefail
         for i in $(seq 1 2000); do
           echo "=== sync attempt $i ==="
@@ -106,12 +107,12 @@ jobs:
           bad=$(grep -oP 'remove-project (path|name)="[^"]*"' /tmp/sync.log | head -1 | sed 's/remove-project [a-z]*="//;s/"//')
           if [ -z "$bad" ]; then
             echo "=== sync failed, no remove-project error ==="
+            tail -40 /tmp/sync.log
             exit 1
           fi
           echo "=== removing non-existent: $bad ==="
           sed -i "\|\"$bad\"|d" .repo/local_manifests/remove-minimal.xml
         done
-        # 删掉所有 .git 目录，省 5-10GB 磁盘（--depth=1 后不再需要 git 历史）
         find /mnt/work -name .git -type d -prune -exec rm -rf {} + 2>/dev/null || true
         df -h /
 
@@ -119,6 +120,8 @@ jobs:
       run: |
         mkdir -p /mnt/work/device/lenovo/tb323fu
         cp -r device/lenovo/tb323fu/* /mnt/work/device/lenovo/tb323fu/
+        echo "设备树文件数: $(find /mnt/work/device/lenovo/tb323fu -type f | wc -l)"
+        ls -la /mnt/work/device/lenovo/tb323fu | head
 
     - name: Build recovery
       run: |
@@ -130,7 +133,7 @@ jobs:
         export ANDROID_JAVA_OPTS="-Xmx4g -Xms1g"
         export GOMEMLIMIT=12GiB
         export GOGC=50
-        mka adbd recoveryimage -j2
+        mka adbd recoveryimage -j2 2>&1 | tee /tmp/build.log
 
     - name: Upload recovery image
       uses: actions/upload-artifact@v4
@@ -138,3 +141,12 @@ jobs:
         name: tb323fu-recovery-img
         path: /mnt/work/out/target/product/tb323fu/recovery.img
         retention-days: 7
+        if-no-files-found: error
+
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: /tmp/build.log
+        retention-days: 3

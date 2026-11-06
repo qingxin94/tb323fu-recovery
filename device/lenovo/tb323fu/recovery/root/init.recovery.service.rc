@@ -1,0 +1,7 @@
+on boot
+
+# recovery 主程序（AERA 5.0+ 起法，与官方 11 台一致）
+service recovery /system/bin/recovery
+    socket recovery stream 422 system system
+    seclabel u:r:recovery:s0
+    user root

@@ -1,0 +1,49 @@
+# init.recovery.audio.rc — TB323FU
+# AERA 官方树的 vendor 侧音频三件套（从 macan 包原样取出二进制，路径与 LD 环境按本机改写）。
+# 本机 vendor 直接挂在 /vendor，不需要 macan 那种 /mnt/aera-stock，故 LD_LIBRARY_PATH 去掉 aera-stock 段。
+# 全部 disabled：由 AERA 的 /system/bin/aera-audio-bootstrap 按需拉起，避免开不了机时刷屏重启
+
+service aera-pd-mapper /vendor/bin/aera-pd-mapper
+    class core
+    disabled
+    user system
+    group system
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/lib64:/system/lib64
+
+service aera-dspservice /vendor/bin/aera-dspservice
+    class hal
+    disabled
+    user system
+    group system wakelock oem_2908
+    capabilities BLOCK_SUSPEND
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/lib64:/system/lib64
+    interface aidl vendor.qti.hardware.dsp.IDspService/default
+
+service aera-audioadsprpcd /vendor/bin/aera-audioadsprpcd audiopd adsp
+    class main
+    disabled
+    user media
+    group media
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/lib64:/system/lib64
+
+# AERA 自己编出来的 AGM/PAL 桥（system/bin，随 PRODUCT_PACKAGES 进包）
+service aera-agm-service /system/bin/aera-audio-service
+    class main
+    disabled
+    user root
+    group root system audio media wakelock
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /vendor/aera-audio-abi:/vendor/lib64:/system/lib64
+    setenv ANDROID_ROOT /system
+    setenv ANDROID_DATA /data
+    interface aidl vendor.qti.hardware.agm.IAGM/default
+    interface aidl vendor.qti.hardware.pal.IPAL/default
+
+# 调试用：adbshell 里 `setprop aera.audio.enable 1` 即可手动拉起这三件，看 logcat 排错
+on property:aera.audio.enable=1
+    start aera-pd-mapper
+    start aera-dspservice
+    start aera-audioadsprpcd

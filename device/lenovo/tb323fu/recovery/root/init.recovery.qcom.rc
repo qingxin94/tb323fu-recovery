@@ -1,117 +1,68 @@
-# init.recovery.qcom.rc — Lenovo Legion Y700 (tb323fu)
-# AERA 16 / SM8850 / canoe / Virtual A/B
-# USB/MTP/ADB/fastboot gadget state machine lives in init.recovery.usb.rc.
-# SPDX-License-Identifier: Apache-2.0
+# init.recovery.qcom.rc — Lenovo Legion Y700 5th Gen (TB323FU, canoe/sm8850)
+# 参考 11 台官方 AERA 树的同名文件，服务名/脚本名全部换成本机实测值
 
-import /init.recovery.hlthchrg.rc
 import /init.recovery.usb.rc
 import /init.recovery.wifi.rc
+import /init.recovery.audio.rc
+
+on early-init
+    # Qualcomm Mapper5/SnapAlloc：让 Adreno EGL 与 KMS 共享 buffer
+    setprop vendor.gralloc.enable_snapalloc true
+    start vendor.qseecomd
+    start vendor.gatekeeper_default
+    start vendor.keymint
+
+# 显示分配器：Adreno 渲染必须先有 gralloc-native buffer（根 rc 里起，早于 vendor 片段）
+service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
+    class hal
+    seclabel u:r:recovery:s0
+    user root
+    group root graphics
+    capabilities SYS_NICE
+
+# 本机 post_boot 脚本（canoe 平台，6.2/6_2 两套后缀都在 vendor/bin 里）
+service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-canoe_default_6_2.sh
+    user root
+    group root
+    oneshot
+    seclabel u:r:recovery:s0
 
 on early-fs
-    write /proc/sys/walt/sched_lib_name "recovery,magiskboot,Updater,updater,update_engine_sideload"
+    write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
     write /proc/sys/walt/sched_lib_mask_force 255
 
+on init
+    setprop sys.usb.configfs 1
+
 on fs
-    # Stable bootdevice path (UFS controller from device: 1d84000.ufshc)
     wait /dev/block/platform/soc/${ro.boot.bootdevice}
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
-
-    # Required for firmware sysfs fallback in recovery (WLAN/cnss blobs)
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
-
-    # QSEECom / TA access
-    chmod 0660 /dev/qseecom
-    chown system drmrpc /dev/qseecom
-    chmod 0664 /dev/ion
-    chown system system /dev/ion
-
-    # Mount persist for QSEE credentials
-    mkdir /mnt/vendor 0775 shell system
-    mkdir /mnt/vendor/persist 0775 shell system
-    wait /dev/block/bootdevice/by-name/persist
-    mount ext4 /dev/block/bootdevice/by-name/persist /persist noatime nosuid nodev barrier=1
-    mount none /persist /mnt/vendor/persist bind
-
-    # Mount modem firmware (slot-aware, vfat format like official AERA)
-    mkdir /firmware 0755 root root
-    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
-
-    # One owner for the physical firmware mount, shared by ADSP and WLAN
-    # (same pattern as the official AERA qcom trees). request_firmware() and the
-    # WLAN driver look for /vendor/firmware_mnt/image, stock fstab mounts modem
-    # there, so we expose the same view over the real modem vfat mount.
-    # This is a real bind mount, NOT a symlink.
-    mkdir /vendor/firmware_mnt 0755 root root
-    mount none /firmware /vendor/firmware_mnt bind
-
-    # NOTE: vendor / vendor_dlkm / odm are LOGICAL partitions living inside "super"
-    # (fstab: ...logical,first_stage_mount). There is NO /dev/block/bootdevice/by-name/vendor
-    # on this device, so mounting them here always fails AND blocks init for the wait
-    # timeout. Their firmware access is handled by the recovery framework via
-    # /dev/block/mapper/* when the user actually browses files.
-    # Essential firmware/config is instead shipped in the ramdisk:
-    #   recovery/root/vendor/firmware/  ->  /vendor/firmware/
-
-    # Mount metadata
-    mkdir /metadata 0755 root root
-    wait /dev/block/bootdevice/by-name/metadata
-    mount f2fs /dev/block/bootdevice/by-name/metadata /metadata noatime nosuid nodev
-
-    # Mount prodpersist
-    mkdir /mnt/product 0755 root root
-    mkdir /mnt/product/persist 0755 root root
-    wait /dev/block/bootdevice/by-name/prodpersist
-    mount ext4 /dev/block/bootdevice/by-name/prodpersist /mnt/product/persist noatime nosuid nodev
-
-    # Mount DSP firmware (audio)
-    mkdir /vendor/dsp 0755 root root
-    wait /dev/block/bootdevice/by-name/dsp
-    mount ext4 /dev/block/bootdevice/by-name/dsp /vendor/dsp ro nosuid nodev
-
-    # Mount Bluetooth firmware
-    mkdir /vendor/bt_firmware 0755 root root
-    wait /dev/block/bootdevice/by-name/bluetooth
-    mount ext4 /dev/block/bootdevice/by-name/bluetooth /vendor/bt_firmware ro nosuid nodev
-
-    # Mount FSG firmware
-    mkdir /vendor/fsg 0755 root root
-    wait /dev/block/bootdevice/by-name/fsg
-    mount ext4 /dev/block/bootdevice/by-name/fsg /vendor/fsg ro nosuid nodev
-
-    # Mount SOCCP firmware
-    mkdir /vendor/soccp_firmware 0755 root root
-    wait /dev/block/bootdevice/by-name/soccp
-    mount vfat /dev/block/bootdevice/by-name/soccp /vendor/soccp_firmware ro
-
-    # Gatekeeper config for QTI TEE-based GK (not SPU-based)
-    setprop vendor.gatekeeper.disable_spu true
-    setprop vendor.gatekeeper.is_security_level_spu 0
-
-on boot
-    # Start ADB over USB
-    setprop sys.usb.config adb
-    setprop sys.usb.configfs 1
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
+    wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode
+    write /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode peripheral
+    wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
-# -----------------------------------------------------------------------------
-# Post-module-load setup
-# The recovery backend sets twrp.modules.loaded=true after loading modules.
-# -----------------------------------------------------------------------------
 on property:twrp.modules.loaded=true
-    # Load ADSP for PMIC / battery
-    wait /sys/kernel/boot_adsp/boot
-    write /sys/kernel/boot_adsp/boot 1
+    mkdir /firmware
+    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
     wait /sys/kernel/boot_adsp/ssr
     write /sys/kernel/boot_adsp/ssr 1
-    # Wait for battery path
     wait /sys/class/power_supply/battery
+    start vendor.health-default
+    start display_aidl_service
+    start touchscreen_hal_service
+    umount /firmware
 
-    # Vibration + battery HALs are vendor services, they only come up after the
-    # vendor partition is visible (same as the official AERA qcom trees).
-    start vendor.qti.vibrator
-    start health-hal-2-1
+on property:twrp.fastboot.mode=1
+    start vendor.usb-hal
 
-on property:servicemanager.ready=true
-    setprop sys.boot_completed 1
+# OrangeFox 血统的 prepdecrypt：本机有独立 recovery 分区，脚本会走 SETPATCH=false 分支，
+# 实际作用=把 ro.build.version.release / security_patch 与真机对齐，然后置 crypto.ready=1
+on property:ro.crypto.state=encrypted
+    start prepdecrypt.vendor
+
+on property:crypto.ready=1
+    start display_aidl_service

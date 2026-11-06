@@ -1,79 +1,57 @@
 #
-# Copyright (C) 2026 AERA Recovery
-# aera_tb323fu.mk - product config for Lenovo Legion Y700 (tb323fu)
+# Copyright (C) 2025 The AERA Recovery Project
+#
+# SPDX-License-Identifier: Apache-2.0
 #
 
-# ─── Product inheritance chain (aligned with myron/canoe proven template) ───
-# base.mk pulls in base_vendor.mk which supplies the recovery variant modules
-# (init_second_stage.recovery, adbd.recovery, linker.recovery, ...). Without it
-# $(TARGET_ROOT_OUT) is never created and ramdisk assembly fails with
-# "rsync: link_stat .../root failed: No such file or directory".
+# Configure base.mk
 $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
+
+# Configure core_64_bit_only.mk
 $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit_only.mk)
+
+# Configure virtual_ab compression.mk
 $(call inherit-product, $(SRC_TARGET_DIR)/product/virtual_ab_ota/compression.mk)
+
+# Configure emulated_storage.mk
 $(call inherit-product, $(SRC_TARGET_DIR)/product/emulated_storage.mk)
 
-# Inherit AERA Recovery common config
+# Configure twrp common.mk
 $(call inherit-product, vendor/twrp/config/common.mk)
 
-$(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
-
-# Inherit device makefile
+# Inherit from TB323FU device
 $(call inherit-product, device/lenovo/tb323fu/device.mk)
 
-# Product identity
-PRODUCT_NAME := twrp_tb323fu
 PRODUCT_DEVICE := tb323fu
+PRODUCT_NAME := twrp_tb323fu
 PRODUCT_BRAND := Lenovo
-PRODUCT_MODEL := TB323FU
-PRODUCT_MANUFACTURER := Motorola Mobility
+PRODUCT_MODEL := Lenovo Legion Y700 5th Gen
+PRODUCT_MANUFACTURER := LENOVO
 
-# Overrides (real fingerprint extracted from boot_a.img)
-PRODUCT_BUILD_PROP_OVERRIDES += \
-    PRODUCT_DEVICE=tb323fu \
-    PRODUCT_NAME=tb323fu \
-    PRIVATE_BUILD_DESC="tb323fu-user 16 BQ2A.250831.001-BP2A.250605.031.A3 10.026.260205C release-keys"
-
+# ===== 真机指纹（从本机 boot.img 的 ramdisk/prop.default 原样读出，不是编的）=====
+# ro.build.fingerprint / ro.system.build.fingerprint / ro.product.build.fingerprint 三者一致：
+#   Lenovo/TB323FU/TB323FU:16/BQ2A.250831.001-BP2A.250605.031.A3/10.026.260205C:user/release-keys
+# 对应固件 ZUX OS 2.0.10.026（boot.img 所在版本）
 BUILD_FINGERPRINT := Lenovo/TB323FU/TB323FU:16/BQ2A.250831.001-BP2A.250605.031.A3/10.026.260205C:user/release-keys
+PRIVATE_BUILD_DESC := TB323FU-user 16 BQ2A.250831.001-BP2A.250605.031.A3 26 release-keys
 
-# ─── AERA device config (aligned with myron/canoe proven template) ───
-# Kernel and recovery behavior
-AERA_FORCE_PREBUILT_KERNEL := 1
-AERA_AB_DEVICE_WITH_RECOVERY_PARTITION := 1
-AERA_NO_RELOAD_AFTER_DECRYPTION := 1
-AERA_NO_TREBLE_COMPATIBILITY_CHECK := 1
-AERA_USE_LZ4_COMPRESSION := 1
-AERA_ENABLE_WLAN := 1
-AERA_ENABLE_FRP_WIPE := 1
-AERA_USE_AIDL_BOOT_CONTROL := 1
+# 若按 firmware.7z 里的 2.0.12.088 出包（vendor/odm build.prop 的 incremental=88），把上面两行换成：
+# BUILD_FINGERPRINT := Lenovo/TB323FU/TB323FU:16/BQ2A.250831.001-BP2A.250605.031.A3/88:user/release-keys
+# PRIVATE_BUILD_DESC := TB323FU-user 16 BQ2A.250831.001-BP2A.250605.031.A3 88 release-keys
 
-# Partition / format handling
-AERA_DYNAMIC_FULL_SIZE := 16441663488
-AERA_DISPLAY_FORMAT_FILESYSTEMS_DEBUG_INFO := 1
-AERA_ENABLE_ALL_PARTITION_TOOLS := 1
-AERA_USE_DMCTL := 1
-AERA_FORCE_DATA_FORMAT_F2FS := 1
-AERA_FORCE_CASEFOLDING := 1
-AERA_UNBIND_SDCARD_F2FS := 1
-AERA_BIND_MOUNT_SDCARD_ON_FORMAT := 1
-AERA_UNMOUNT_SDCARDS_BEFORE_REBOOT := 1
-AERA_WIPE_METADATA_AFTER_DATAFORMAT := 1
-AERA_WORKAROUND_BACKUP_BUG := 1
+# 平台/机型属性（配合 system.prop，缺一项 AERA 的机型判定会落到 unknown）
+PRODUCT_BUILD_PROP_OVERRIDES += \
+    PRODUCT_DEVICE=TB323FU \
+    PRODUCT_MODEL="Lenovo Legion Y700 5th Gen" \
+    PRODUCT_BRAND=Lenovo \
+    PRODUCT_MANUFACTURER=LENOVO \
+    TARGET_BUILD_TYPE=user \
+    BUILD_ID=BQ2A.250831.001-BP2A.250605.031.A3 \
+    BUILD_DISPLAY_ID=TB323FU_CN_OPEN_USER_Q00020.0_A16_ZUXOS_2.0.10.026_ST_260205 \
+    PRODUCT_LOCALE=zh-Hans-CN \
+    PLATFORM_VERSION=16 \
+    PLATFORM_SECURITY_PATCH=2025-06-05 \
+    BUILD_FINGERPRINT=$(BUILD_FINGERPRINT)
 
-# UI metrics for 横版平板 (landscape) — 物理分辨率 3040x1904
-AERA_MAINTAINER := qingxin94
-AERA_SCREEN_H := 1904
-AERA_STATUS_H := 80
-AERA_STATUS_INDENT_LEFT := 40
-AERA_STATUS_INDENT_RIGHT := 40
-AERA_HIDE_NOTCH := 1
-AERA_CLOCK_POS := 1
-AERA_OPTIONS_LIST_NUM := 6
-
-# Misc
-AERA_ALLOW_POPULATED_MEDIA_WITHOUT_POLICY := 1
-PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
-    ro.aera.allow_nonempty_media=$(AERA_ALLOW_POPULATED_MEDIA_WITHOUT_POLICY)
-
-# 默认中文
-PRODUCT_PROPERTY_OVERRIDES += ro.product.locale=zh-CN
+# Theme
+AERA_STATUS_ICONS_ALIGN := center
