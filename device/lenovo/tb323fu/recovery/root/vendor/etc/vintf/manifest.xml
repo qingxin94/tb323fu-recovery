@@ -2,7 +2,7 @@
 <!-- AERA tb323fu: vendor device manifest (single-file).
      HAL fragments live in vendor/etc/vintf/manifest/, do NOT duplicate them here. -->
 <manifest version="9.0" type="device" target-level="202504">
-    <hal format="aidl"><name>android.hardware.gatekeeper</name><fqname>IGatekeeper/default</fqname></hal><hal format="aidl"><name>android.hardware.security.keymint</name><version>4</version><fqname>IKeyMintDevice/default</fqname></hal><hal format="aidl"><name>android.hardware.security.keymint</name><version>3</version><fqname>IRemotelyProvisionedComponent/default</fqname></hal><sepolicy>
+    <sepolicy>
         <version>202504</version>
     </sepolicy>
 </manifest>
