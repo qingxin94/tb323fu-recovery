@@ -143,6 +143,10 @@ AERA_FRAMERATE := 165
 # 屏幕：8.8" 3040×1904 165Hz
 
 # 设备标识
+# 默认语言：官方 catalog.json 自带 zh_CN 2745 条官方翻译
+AERA_DEFAULT_LANGUAGE := "zh_CN"
+AERA_EXTRA_LANGUAGES := true
+
 AERA_DEVICE_VERSION := Y700_5th_Gen
 AERA_MAINTAINER := TB323FU
 AERA_TARGET_DEVICES := TB323FU
@@ -159,7 +163,8 @@ nvt_36xxx.ko msm_drm.ko msm_kgsl.ko \
 qmi_helpers.ko qcom_glink.ko qcom_glink_smem.ko qcom_smd.ko qcom_pdr_msg.ko \
 pdr_interface.ko rproc_qcom_common.ko qti_pmic_glink.ko hqsysfs.ko \
 qti_battery_charger.ko qti_battery_debug.ko qcom-hv-haptics.ko \
-swr_dlkm.ko swr_haptics_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko"
+swr_dlkm.ko swr_haptics_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko \
+qcom_glink_spss.ko qcom_spss.ko spss_utils.ko spcom.ko"
 # ↑ 第一阶段（解密前）加载，顺序依据各 .ko 的 modinfo depends=（实测，非猜）：
 #   panel_event_notifier 无依赖，却是 nvt_36xxx / msm_drm / qti_battery_charger 的公共依赖 → 必须第 1 个
 #   nvt_36xxx(modinfo: depends=panel_event_notifier) → msm_drm(modinfo: depends=...,nvt_36xxx,...)
