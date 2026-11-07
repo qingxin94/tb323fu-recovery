@@ -1,0 +1,7 @@
+service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
+    class early_hal
+    user system
+    group system drmrpc
+    disabled
+    shutdown critical
+    seclabel u:r:recovery:s0

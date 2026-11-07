@@ -1,0 +1,7 @@
+service vendor.keymint-spu-qti /vendor/bin/hw/android.hardware.security.keymint-service-spu-qti
+    class early_hal
+    user system
+    group system drmrpc
+    disabled
+    shutdown critical
+    seclabel u:r:recovery:s0

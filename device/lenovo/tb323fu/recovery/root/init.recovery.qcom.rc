@@ -7,6 +7,12 @@ import /init.recovery.audio.rc
 
 on early-init
     mount none /vendor/odm /odm bind
+    # SPU / KeyMint 判定属性（与官方 qcom rc 一致）
+    setprop keymaster_ver 4.x
+    setprop ro.crypto.dm_default_key.options_format.version 2
+    setprop ro.vendor.board.family f-canoe
+    setprop ro.vendor.qti.soc_name canoe
+    setprop vendor.gatekeeper.is_security_level_spu 1
     # Qualcomm Mapper5/SnapAlloc：让 Adreno EGL 与 KMS 共享 buffer
     setprop vendor.gralloc.enable_snapalloc true
     start vendor.qseecomd
@@ -48,15 +54,43 @@ on property:ro.boot.usbcontroller=*
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on property:twrp.modules.loaded=true
+    # 固件分区：SPU 固件 spss1p.mdt 在这里，attach 期间必须保持挂载
     mkdir /firmware
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
+    symlink /firmware /vendor/firmware_mnt
     wait /sys/kernel/boot_adsp/ssr
     write /sys/kernel/boot_adsp/ssr 1
+
+    # persist：iar_db / secnvm / spudc 是 SPU 密钥材料的落点
+    mkdir /persist 0771 system system
+    mount ext4 /dev/block/bootdevice/by-name/persist /persist
+    mkdir /mnt/vendor/persist 0660 system system
+    mount ext4 /persist /mnt/vendor/persist bind
+    mkdir /persist/secnvm 0770 system system
+    mkdir /persist/spudc 0770 system system
+    mkdir /persist/iar_db 0770 system system
+
+    # spunvm：SPU NVM 备份区
+    mkdir /mnt/vendor/spunvm 0660 system system
+    mount vfat /dev/block/bootdevice/by-name/spunvm /mnt/vendor/spunvm
+
+    # 不重打标签 init 会拒绝启动 /vendor/bin 下的服务
+    restorecon --recursive /vendor/bin
+    restorecon --recursive /vendor/lib64
+    restorecon --recursive /vendor/etc
+
+    start vendor.spdaemon
+    start vendor.sec_nvm
+    start vendor.qti.hardware.spu.service
+    start vendor.keymint-spu-qti
+    start vendor.gatekeeper_spu
+    start vendor.secretkeeper
+    start vendor.spu_weaver
+
     wait /sys/class/power_supply/battery
     start vendor.health-default
     start display_aidl_service
     start touchscreen_hal_service
-    umount /firmware
 
 on property:twrp.fastboot.mode=1
     start vendor.usb-hal
