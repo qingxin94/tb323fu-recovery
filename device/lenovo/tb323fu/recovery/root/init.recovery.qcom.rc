@@ -6,6 +6,7 @@ import /init.recovery.wifi.rc
 import /init.recovery.audio.rc
 
 on early-init
+    mount none /vendor/odm /odm bind
     # Qualcomm Mapper5/SnapAlloc：让 Adreno EGL 与 KMS 共享 buffer
     setprop vendor.gralloc.enable_snapalloc true
     start vendor.qseecomd
@@ -32,6 +33,7 @@ on early-fs
     write /proc/sys/walt/sched_lib_mask_force 255
 
 on init
+    write /sys/class/backlight/panel0-backlight/brightness 200
     setprop sys.usb.configfs 1
 
 on fs
@@ -66,3 +68,7 @@ on property:ro.crypto.state=encrypted
 
 on property:crypto.ready=1
     start display_aidl_service
+
+# AERA UI 就绪标记（官方 11 台同款）
+on property:hwservicemanager.ready=true
+    setprop sys.boot_completed 1

@@ -1,3 +1,8 @@
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AERA tb323fu: vendor device manifest (single-file).
+     HAL fragments live in vendor/etc/vintf/manifest/, do NOT duplicate them here. -->
 <manifest version="9.0" type="device" target-level="202504">
+    <sepolicy>
+        <version>202504</version>
+    </sepolicy>
 </manifest>
