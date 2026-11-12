@@ -39,6 +39,8 @@ on early-fs
 on init
     write /sys/class/backlight/panel0-backlight/brightness 200
     setprop sys.usb.configfs 1
+    # 基线：开启 prepdecrypt 的 setpatch 覆盖，让 release / security_patch 对齐真机
+    setprop prepdecrypt.setpatch true
 
 on fs
     wait /dev/block/platform/soc/${ro.boot.bootdevice}
@@ -121,8 +123,8 @@ on property:vendor.gatekeeper.is_security_level_spu=1
     start vendor.gatekeeper_spu
     start vendor.spu_weaver
 
-# OrangeFox 血统的 prepdecrypt：本机有独立 recovery 分区，脚本会走 SETPATCH=false 分支，
-# 实际作用=把 ro.build.version.release / security_patch 与真机对齐，然后置 crypto.ready=1
+# prepdecrypt（基线 ISR 版）：挂载临时 system/vendor，对齐 release / security_patch，
+# 从 vendor build.prop 读取 SPU gatekeeper 判定，最后置 crypto.ready=1
 on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
     start prepdecrypt.vendor
 

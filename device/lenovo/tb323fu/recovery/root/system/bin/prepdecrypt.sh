@@ -1,4 +1,4 @@
-#!/sbin/sh
+#!/system/bin/sh
 
 # The below variables shouldn't need to be changed
 # unless you want to call the script something else
@@ -22,12 +22,12 @@ check_setpatch_override()
 	fi
 }
 #
-# Default recovery values for PLATFORM_VERSION and PLATFORM_SECURITY_PATCH
+# Default TWRP values for PLATFORM_VERSION and PLATFORM_SECURITY_PATCH
 #
 # ro.build.version.release and ro.build.version.security_patch will get
 # set to the below values respectively if these props are blank when
 # the script runs. These values should be updated to reflect the
-# Recovery defaults in the device BoardConfig.mk
+# TWRP defaults in your device's BoardConfig.mk
 osver_twrp="99.87.36"
 patchlevel_twrp="2099-12-31"
 
@@ -266,7 +266,7 @@ sdkver=$(getprop ro.build.version.sdk)
 patchlevel=$(getprop ro.build.version.security_patch)
 patchlevel_orig=$(getprop ro.build.version.security_patch_orig)
 
-log_print 2 "Running $SCRIPTNAME for AERA..."
+log_print 2 "Running $SCRIPTNAME script for TWRP..."
 check_encrypt
 
 log_print 2 "SDK version: $sdkver"
@@ -389,6 +389,11 @@ if [ "$sdkver" -ge 26 ]; then
 						if ! [ "$venpatchlevel_device" = "$venpatchlevel_default" ]; then
 							sed -i "s/ro.vendor.build.security_patch=.*/ro.vendor.build.security_patch=""$venpatchlevel_device""/g" "/$DEFAULTPROP" ;
 						fi
+					fi
+					ven_spu_gk=$(grep -i -m 1 'vendor.gatekeeper.is_security_level_spu=' "$TEMPVEN/$BUILDPROP" "$TEMPVEN/etc/build.prop" 2>/dev/null | cut -f2 -d'=' -s | head -n 1)
+					if [ -n "$ven_spu_gk" ]; then
+						log_print 1 "Detected vendor.gatekeeper.is_security_level_spu=$ven_spu_gk from vendor build.prop"
+						$setprop_bin "vendor.gatekeeper.is_security_level_spu" "$ven_spu_gk"
 					fi
 				else
 					log_print 2 "Current vendor is Nougat or older. Skipping vendor security patch level setting..."
