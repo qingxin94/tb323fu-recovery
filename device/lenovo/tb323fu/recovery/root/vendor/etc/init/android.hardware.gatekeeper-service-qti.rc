@@ -1,11 +1,12 @@
-# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
-# All rights reserved.
-# Confidential and Proprietary - Qualcomm Technologies, Inc. 
+# Default (TEE) gatekeeper. Selected only when vendor.gatekeeper.is_security_level_spu=0.
+# Aligned to proven TWRP baseline ISR; binary on this device is the rust service.
 
 service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
     class early_hal
     user system
     group system
+    disabled
+    seclabel u:r:recovery:s0
 
 on property:vendor.gatekeeper.is_security_level_spu=0
     enable vendor.gatekeeper_default

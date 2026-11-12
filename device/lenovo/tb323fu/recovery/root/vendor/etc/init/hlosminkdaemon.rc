@@ -1,21 +1,10 @@
-# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
-# All Rights Reserved.
-# Confidential and Proprietary - Qualcomm Technologies, Inc.
+# HLOS mink daemon. Started explicitly from the modules.loaded chain.
+# Aligned to proven TWRP baseline ISR (single hlos_mink_opener socket, system group).
 
-# Create the directories used by qwes
-on post-fs-data
-    mkdir /data/vendor/qwes 0755 system system
-
-# Start daemon on early-init
-on early-boot
-    start vendor.minkdaemon
-
-# Used 'disabled' flag, so daemon won't be started until explicit start
 service vendor.minkdaemon /vendor/bin/hlosminkdaemon
     class late_start
     user system
-    group system oem_2912 wakelock
-    capabilities WAKE_ALARM BLOCK_SUSPEND
-    disabled
-    socket ssgtzd stream 0660 system oem_2912
+    group system
     socket hlos_mink_opener stream 0660 system system
+    disabled
+    seclabel u:r:recovery:s0

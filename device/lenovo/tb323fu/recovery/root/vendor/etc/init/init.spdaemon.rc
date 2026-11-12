@@ -1,7 +1,12 @@
-on init
+# SPU daemons (spdaemon / sec_nvm). Aligned to proven TWRP baseline ISR:
+# persist/spunvm directories are created in fs/post-fs, not on init.
+
+on fs
     mkdir /mnt/vendor/persist/secnvm 0770 system system
     mkdir /mnt/vendor/persist/spudc 0770 system system
     mkdir /mnt/vendor/spunvm 0660 system system
+
+on post-fs
     mkdir /mnt/vendor/persist/iar_db 0770 system system
 
 service vendor.spdaemon /vendor/bin/spdaemon
@@ -17,5 +22,4 @@ service vendor.sec_nvm /vendor/bin/sec_nvm
     user system
     group system
     disabled
-    shutdown critical
     seclabel u:r:recovery:s0

@@ -15,9 +15,7 @@ on early-init
     setprop vendor.gatekeeper.is_security_level_spu 1
     # Qualcomm Mapper5/SnapAlloc：让 Adreno EGL 与 KMS 共享 buffer
     setprop vendor.gralloc.enable_snapalloc true
-    start vendor.qseecomd
-    start vendor.gatekeeper_default
-    start vendor.keymint
+    # 安全服务统一在 modules.loaded 链里按基线顺序启动，early-init 不再提前拉起
 
 # 显示分配器：Adreno 渲染必须先有 gralloc-native buffer（根 rc 里起，早于 vendor 片段）
 service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
@@ -47,6 +45,19 @@ on fs
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
+    # 固件分区：SPU 固件 spss1p.mdt 在这里，attach 期间必须保持挂载（基线在 on fs 挂载）
+    wait /dev/block/bootdevice/by-name/persist 10
+    wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 10
+    mkdir /firmware 0771 root root
+    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
+    symlink /firmware /vendor/firmware_mnt
+
+    # persist：iar_db / secnvm / spudc 是 SPU 密钥材料的落点（基线在 on fs 挂载）
+    mkdir /persist 0771 root root
+    mount ext4 /dev/block/bootdevice/by-name/persist /persist
+    mkdir /mnt/vendor/persist 0771 root root
+    mount ext4 /persist /mnt/vendor/persist bind
+
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
     wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode
@@ -54,40 +65,44 @@ on property:ro.boot.usbcontroller=*
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on property:twrp.modules.loaded=true
-    # 固件分区：SPU 固件 spss1p.mdt 在这里，attach 期间必须保持挂载
-    mkdir /firmware
-    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
-    symlink /firmware /vendor/firmware_mnt
-    wait /sys/kernel/boot_adsp/ssr
+    # ADSP 固件加载（PMIC）
+    wait /firmware/image/adsp.mdt 5
+    wait /sys/kernel/boot_adsp/ssr 2
     write /sys/kernel/boot_adsp/ssr 1
-
-    # persist：iar_db / secnvm / spudc 是 SPU 密钥材料的落点
-    mkdir /persist 0771 system system
-    mount ext4 /dev/block/bootdevice/by-name/persist /persist
-    mkdir /mnt/vendor/persist 0660 system system
-    mount ext4 /persist /mnt/vendor/persist bind
-    mkdir /persist/secnvm 0770 system system
-    mkdir /persist/spudc 0770 system system
-    mkdir /persist/iar_db 0770 system system
 
     # spunvm：SPU NVM 备份区
     mkdir /mnt/vendor/spunvm 0660 system system
+    wait /dev/block/bootdevice/by-name/spunvm 5
     mount vfat /dev/block/bootdevice/by-name/spunvm /mnt/vendor/spunvm
+
+    # persist 子目录（persist 本体已在 on fs 挂载）
+    mkdir /persist/secnvm 0770 system system
+    mkdir /persist/spudc 0770 system system
+    mkdir /persist/iar_db 0770 system system
 
     # 不重打标签 init 会拒绝启动 /vendor/bin 下的服务
     restorecon --recursive /vendor/bin
     restorecon --recursive /vendor/lib64
     restorecon --recursive /vendor/etc
+    restorecon --recursive /persist
+    restorecon --recursive /mnt/vendor/persist
 
-    start vendor.spdaemon
-    start vendor.sec_nvm
-    start vendor.qti.hardware.spu.service
+    # 安全链顺序对齐成品基线：qseecomd → mink → 默认 KM → SPU KM → SPU gatekeeper → spdaemon → sec_nvm → weaver
+    # 本机实测为 SPU Weaver 型（vendor.gatekeeper.is_security_level_spu=1），直接起 SPU 侧，不依赖属性触发补拉
+    start vendor.qseecomd
+    start vendor.minkdaemon
+    start vendor.keymint
     start vendor.keymint-spu-qti
     start vendor.gatekeeper_spu
-    start vendor.secretkeeper
+    start vendor.spdaemon
+    start vendor.sec_nvm
     start vendor.spu_weaver
 
-    wait /sys/class/power_supply/battery
+    # 本机额外 SPU 服务（基线无），排在主链之后
+    start vendor.qti.hardware.spu.service
+    start vendor.secretkeeper
+
+    wait /sys/class/power_supply/battery 2
     start vendor.health-default
     start display_aidl_service
     start touchscreen_hal_service
@@ -95,12 +110,24 @@ on property:twrp.modules.loaded=true
 on property:twrp.fastboot.mode=1
     start vendor.usb-hal
 
+# Gatekeeper / Weaver 后端选择（对齐成品基线）：SPU 型停默认、起 SPU；TEE 型反之
+on property:vendor.gatekeeper.is_security_level_spu=0
+    stop vendor.gatekeeper_spu
+    stop vendor.spu_weaver
+    start vendor.gatekeeper_default
+
+on property:vendor.gatekeeper.is_security_level_spu=1
+    stop vendor.gatekeeper_default
+    start vendor.gatekeeper_spu
+    start vendor.spu_weaver
+
 # OrangeFox 血统的 prepdecrypt：本机有独立 recovery 分区，脚本会走 SETPATCH=false 分支，
 # 实际作用=把 ro.build.version.release / security_patch 与真机对齐，然后置 crypto.ready=1
-on property:ro.crypto.state=encrypted
+on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
     start prepdecrypt.vendor
 
 on property:crypto.ready=1
+    restart keystore2
     start display_aidl_service
 
 # AERA UI 就绪标记（官方 11 台同款）
