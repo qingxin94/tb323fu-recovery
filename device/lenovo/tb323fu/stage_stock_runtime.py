@@ -94,7 +94,7 @@ for f in vintf_files:
 disp = os.path.join(V, "etc/display")
 if os.path.isdir(disp):
     for f in os.listdir(disp):
-        if f.endswith(".json"):
+        if f in {"camera_alignments.json","cpu_alignments.json","default_alignments.json","display_alignments.json","formats.json","graphics_alignments.json","ubwc_alignments.json","video_alignments.json"}:
             cp(os.path.join(disp, f), os.path.join(OUT, "vendor/etc/display", f), 0o644)
 
 # ---- firmware -------------------------------------------------------------
