@@ -187,7 +187,7 @@ AERA_SUPPORT_FINGERPRINT := 0
 
 # ---- Module loading (dependency order from stock modules.dep) ----
 # Stage 1 (before decryption): display / touch / haptics / charger
-AERA_LOAD_VENDOR_MODULES := "panel_event_notifier.ko spi-msm-geni.ko i3c-master-msm-geni.ko nvt_36xxx.ko msm_kgsl.ko qmi_helpers.ko qcom_glink.ko qcom_glink_smem.ko qcom_smd.ko qcom_pdr_msg.ko pdr_interface.ko rproc_qcom_common.ko qti_pmic_glink.ko qcom-hv-haptics.ko swr_dlkm.ko swr_haptics_dlkm.ko aw882xx_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko"
+AERA_LOAD_VENDOR_MODULES := "panel_event_notifier.ko spi-msm-geni.ko i3c-master-msm-geni.ko nvt_36xxx.ko msm_kgsl.ko qmi_helpers.ko qcom_glink.ko qcom_glink_smem.ko qcom_smd.ko qcom_pdr_msg.ko pdr_interface.ko rproc_qcom_common.ko qti_pmic_glink.ko qcom-hv-haptics.ko swr_dlkm.ko swr_haptics_dlkm.ko aw882xx_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko adsp_loader_dlkm.ko spcom.ko spss_utils.ko stm_st54se_gpio.ko nxp-nci.ko"
 AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 
 # Stage 2 (after FBE decryption): WiFi/BT (wcn7750)
@@ -200,6 +200,9 @@ AERA_COPY_RUNTIME_TO_RAM := 1
 # recoveries that boot on TB323FU (TWRP-16.0, OrangeFox R12.0) use a fully
 # expanded ramdisk: no aera-runtime.tar.xz, no early-init unpack step.
 AERA_USE_EXTREME_COMPRESSION := 0
+AERA_DEFAULT_KEYMASTER_VERSION := 4.x   # 设备为 AIDL KeyMint V4；不设会触发 aera_build.mk:648 的 $(error)
+AERA_FORCE_KEYMASTER_VER := true
+AERA_INPUT_BLACKLIST := "hbtp_vm"   # 触摸控制器驱动名，避免误判为输入设备
 AERA_USE_UPDATED_MAGISKBOOT := 0   # 默认 prebuilt magiskboot 4K 对齐；_updated 为 16K 对齐，本机 4K 页内核不可用
 TW_INCLUDE_CRYPTO_FBE := true
 TW_INCLUDE_FBE_METADATA_DECRYPT := true
