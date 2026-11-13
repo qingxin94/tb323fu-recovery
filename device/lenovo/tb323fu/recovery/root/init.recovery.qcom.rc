@@ -131,29 +131,12 @@ on property:hwservicemanager.ready=true
 # --- vendor tree and the service layout proven by TWRP-16.0_TB323FU.
 
 on property:twrp.modules.loaded=true
-    insmod /lib/modules/qca_cld3_wcn7750.ko
     mkdir /tmp/recovery 0777 root root
     mkdir /tmp/recovery/sockets 0777 root root
     chmod 0777 /tmp/recovery
     chmod 0777 /tmp/recovery/sockets
     start vendor.lenovo.vibrator
     start vendor.lenovo.battery
-    start cnss-daemon
-    start wpa_supplicant
-
-service wpa_supplicant /vendor/bin/hw/wpa_supplicant \
-    -Dnl80211 -iwlan0 -c/vendor/etc/wifi/wpa_supplicant.conf \
-    -O/tmp/recovery/sockets
-    user root
-    group root wifi inet
-    disabled
-    seclabel u:r:recovery:s0
-
-service cnss-daemon /vendor/bin/cnss-daemon -n -l
-    user root
-    group root wifi inet
-    disabled
-    seclabel u:r:recovery:s0
 
 service vendor.lenovo.vibrator /vendor/bin/hw/vendor.lenovo.hardware.vibrator_dual-service
     class hal

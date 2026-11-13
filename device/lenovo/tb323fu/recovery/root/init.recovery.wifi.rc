@@ -1,26 +1,44 @@
-# Recovery WLAN for TB323FU (WCN7750, cnss2 driver)
+# AERA WLAN bring-up for Lenovo TB323FU (WCN786x / peach v2).
+#
+# The AERA UI enables Wi-Fi on demand by setting sys.aera.wlan.up=1
+# (see bootable/recovery/wlan.cpp). We load the stock driver module closure
+# from /AERA/modules/wlan first, then let init start wpa_supplicant once the
+# driver has created /sys/class/net/wlan0.
+#
+# Adapted from the AERA reference device integration
+# (AERA-Recovery/android_device_oneplus_dodge-AERA recovery/root/init.recovery.wifi.rc),
+# with the driver loading added for this port because the TB323FU stock
+# vendor_boot ramdisk does not carry the WCN786x driver modules.
 
-on property:post.decrypt.modules=true
+on property:sys.aera.wlan.up=1
     setprop sys.aera.wlan.up 0
+    start aera-wlan-loader
+    start aera-wlan-ready
 
-on property:wifi.driver.ready=true
-    mkdir /tmp/recovery 0777 root root
-    mkdir /tmp/recovery/sockets 0777 root root
-    start wpa_supplicant
-
-on property:sys.aera.wlan.up=1 && property:wifi.driver.ready=true
-    setprop sys.aera.wlan.up 0
-    mkdir /tmp/recovery 0777 root root
-    mkdir /tmp/recovery/sockets 0777 root root
-    start wpa_supplicant
-
-service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
+service aera-wlan-loader /system/bin/sh /system/bin/aera-wlan-up.sh
     disabled
+    oneshot
+    user root
+    group root system
     seclabel u:r:recovery:s0
 
-service aera-wlan-ready /system/bin/sh -c "until test -e /sys/class/net/wlan0; do sleep 1; done; setprop wifi.driver.ready true"
+# Forces a fresh 0->1 transition of wifi.driver.ready on every Wi-Fi enable,
+# so the trigger below always re-starts wpa_supplicant.
+service aera-wlan-ready /system/bin/sh -c "setprop wifi.driver.ready false; until test -e /sys/class/net/wlan0; do sleep 1; done; sleep 1; setprop wifi.driver.ready true"
     disabled
     oneshot
     user root
     group root
     seclabel u:r:recovery:s0
+
+service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
+    disabled
+    user root
+    group root system
+    seclabel u:r:recovery:s0
+    setenv AERA_NO_AIDL 1
+
+on property:wifi.driver.ready=true
+    mkdir /tmp/recovery 0777 root root
+    mkdir /tmp/recovery/sockets 0777 root root
+    start wpa_supplicant

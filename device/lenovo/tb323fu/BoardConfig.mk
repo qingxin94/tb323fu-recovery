@@ -131,7 +131,7 @@ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/strace
 AERA_BRIGHTNESS_PATH := "/sys/class/backlight/panel0-backlight/brightness"
 AERA_DEFAULT_BRIGHTNESS := 2047
 AERA_MAX_BRIGHTNESS := 4094
-AERA_SCREEN_H := 3040
+AERA_SCREEN_H := 2280
 AERA_FRAMERATE := 165
 AERA_NO_SCREEN_BLANK := true
 AERA_SCREEN_BLANK_ON_BOOT := true
@@ -200,6 +200,7 @@ AERA_COPY_RUNTIME_TO_RAM := 1
 # recoveries that boot on TB323FU (TWRP-16.0, OrangeFox R12.0) use a fully
 # expanded ramdisk: no aera-runtime.tar.xz, no early-init unpack step.
 AERA_USE_EXTREME_COMPRESSION := 0
+AERA_USE_UPDATED_MAGISKBOOT := 0   # 默认 prebuilt magiskboot 4K 对齐；_updated 为 16K 对齐，本机 4K 页内核不可用
 TW_INCLUDE_CRYPTO_FBE := true
 TW_INCLUDE_FBE_METADATA_DECRYPT := true
 TW_INCLUDE_CRYPTO := true
