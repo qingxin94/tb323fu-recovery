@@ -62,7 +62,7 @@ jobs:
       run: |
         free -h
         df -h /
-        sudo dd if=/dev/zero of=/mnt/swapfile_extra bs=1M count=16384 status=none
+        sudo dd if=/dev/zero of=/mnt/swapfile_extra bs=1M count=8192 status=none
         sudo chmod 600 /mnt/swapfile_extra
         sudo mkswap /mnt/swapfile_extra
         sudo swapon /mnt/swapfile_extra
@@ -128,12 +128,19 @@ jobs:
         set -o pipefail
         source build/envsetup.sh
         lunch twrp_tb323fu-bp2a-eng
+        echo "=== build start ==="; df -h /; free -h
+        ( while true; do echo "$(date -u +%H:%M:%S) $(df -h / | tail -1) | $(free -m | awk '/Mem:/{print "mem used "$3"M avail "$7"M"}') | $(free -m | awk '/Swap:/{print "swap used "$3"M"}')"; sleep 180; done ) > /tmp/resmon.log 2>&1 &
+        MON=$!
         export SOONG_UI_MEMORY=4G
         export GOMAXPROCS=2
         export ANDROID_JAVA_OPTS="-Xmx4g -Xms1g"
         export GOMEMLIMIT=12GiB
         export GOGC=50
         mka adbd recoveryimage -j2 2>&1 | tee /tmp/build.log
+        rc=${PIPESTATUS[0]}
+        kill $MON 2>/dev/null || true
+        echo "=== build end rc=$rc ==="; df -h /; free -h
+        exit $rc
 
     - name: Upload recovery image
       uses: actions/upload-artifact@v4
@@ -142,6 +149,14 @@ jobs:
         path: /mnt/work/out/target/product/tb323fu/recovery.img
         retention-days: 7
         if-no-files-found: error
+
+    - name: Upload resource monitor
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: resource-monitor
+        path: /tmp/resmon.log
+        retention-days: 3
 
     - name: Upload build log on failure
       if: failure()
