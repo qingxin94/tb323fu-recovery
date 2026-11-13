@@ -1,23 +1,40 @@
 # AERA recovery init for Lenovo TB323FU (SM8850 / canoe)
-# Uses the installed ROM's vendor runtime instead of a ramdisk copy of the blobs.
+#
+# Boot ordering is taken from the two recovery images proven to reach the UI on
+# this exact device (TWRP-16.0_TB323FU and OrangeFox-R12.0-fox16.0-TB323FU):
+#   * vendor.boot-qti MUST start inside "on fs", only after the fstab parser
+#     has opened BootControl and after persist/modem block nodes exist.
+#     Starting it earlier creates a circular wait and leaves the device on the
+#     first logo with no UI.
+#   * /firmware (modem vfat) and /persist must be mounted before the module
+#     handler runs; the vendor WLAN/ADSP probes need them.
+#   * rfkill.ko and cfg80211.ko are vendor modules that depend on the GKI
+#     rfkill module, which the stock recovery module list does not carry.
 
 import /init.recovery.usb.rc
 import /init.recovery.wifi.rc
 
 on early-init
+    # GKI rfkill + cfg80211 before any wlan work
+    insmod /lib/modules/rfkill.ko
+    insmod /lib/modules/cfg80211.ko
+    # Use Qualcomm's Mapper5/SnapAlloc path for buffers shared by EGL and KMS.
     setprop vendor.gralloc.enable_snapalloc true
-    # Decrypt through the TEE-backed rust gatekeeper, not through SPU NVM.
-    # The SPU NVM namespace is owned by the running Android and is not
-    # guaranteed to be ready this early; the stock value (=1) makes
-    # keystore2's gatekeeper call block on /dev/smcinvoke forever.
+    # Decrypt through the TEE-backed rust gatekeeper, not through SPU NVM:
+    # the SPU NVM namespace is owned by the running Android.
     setprop vendor.gatekeeper.is_security_level_spu 0
     start vendor.gatekeeper_default
+    mount none /vendor/odm /odm bind
+
+on early-fs
+    write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
+    write /proc/sys/walt/sched_lib_mask_force 255
 
 service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
     class hal
     seclabel u:r:recovery:s0
-    user system
-    group system graphics drmrpc
+    user root
+    group root graphics
     capabilities SYS_NICE
 
 service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-canoe_default_6_2.sh
@@ -25,9 +42,7 @@ service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-can
     group root
     oneshot
     seclabel u:r:recovery:s0
-    disabled
 
-# Stage modem / firmware early: WLAN and ADSP probe before twrp.modules.loaded.
 service aera-runtime-firmware /vendor/bin/aera-runtime-firmware
     disabled
     oneshot
@@ -39,35 +54,56 @@ service aera-runtime-firmware /vendor/bin/aera-runtime-firmware
 on init
     write /sys/class/backlight/panel0-backlight/brightness 200
     setprop sys.usb.configfs 1
-    start vendor.boot-qti
-    start vendor.qseecomd
     setprop prepdecrypt.setpatch true
+    start vendor.qseecomd
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on fs
-    wait /dev/block/platform/soc/${ro.boot.bootdevice}
+    wait /dev/block/platform/soc/${ro.boot.bootdevice} 10
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
-    mkdir /firmware 0755 root root
-    exec_start aera-runtime-firmware
+
+    # Wait for physical UFS nodes before the HALs and the fstab parser race them
+    wait /dev/block/bootdevice/by-name/persist 10
+    wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 10
+
+    # PartitionManager queries BootControl while parsing recovery.fstab.
+    start vendor.boot-qti
+
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
+    mkdir /firmware 0771 root root
+    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
+    symlink /firmware /vendor/firmware_mnt
+
+    mkdir /persist 0771 root root
+    mount ext4 /dev/block/bootdevice/by-name/persist /persist
+    mkdir /mnt/vendor/persist 0771 root root
+    mount ext4 /persist /mnt/vendor/persist bind
+    exec_start aera-runtime-firmware
+
 on property:twrp.modules.loaded=true
-    # ADSP firmware for the PMIC / charger
-    wait /sys/kernel/boot_adsp/ssr
+    wait /firmware/image/adsp.mdt 5
+    wait /sys/kernel/boot_adsp/ssr 2
     write /sys/kernel/boot_adsp/ssr 1
-    wait /sys/class/power_supply/battery
+
+    restorecon --recursive /vendor/bin
+    restorecon --recursive /vendor/lib64
+    restorecon --recursive /vendor/etc
+    restorecon --recursive /persist
+    restorecon --recursive /mnt/vendor/persist
+
+    wait /sys/class/power_supply/battery 2
     start vendor.health-default
     exec_start post-boot-script
 
-# Mount and snapshot the installed ROM runtime before anything consumes it.
 on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
     start prepdecrypt.vendor
 
-# KeyMint only after the vendor runtime and the security world are staged.
 on property:crypto.ready=1
+    restart keystore2
     start vendor.keymint
 
 on property:hwservicemanager.ready=true

@@ -196,7 +196,10 @@ AERA_POST_DECRYPT_MODULES := "rfkill.ko smem-mailbox.ko wlan_firmware_service.ko
 # Stage the installed ROM runtime (vendor/odm/system) in RAM and use it,
 # instead of shipping a hand-picked copy of the vendor blobs in ramdisk.
 AERA_COPY_RUNTIME_TO_RAM := 1
-AERA_USE_EXTREME_COMPRESSION := 1
+# The shipped canoe reference (oneplus_infiniti R1.0) and both community
+# recoveries that boot on TB323FU (TWRP-16.0, OrangeFox R12.0) use a fully
+# expanded ramdisk: no aera-runtime.tar.xz, no early-init unpack step.
+AERA_USE_EXTREME_COMPRESSION := 0
 
 # Verified Boot
 BOARD_AVB_ENABLE := true
