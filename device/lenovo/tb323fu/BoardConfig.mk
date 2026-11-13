@@ -200,6 +200,9 @@ AERA_COPY_RUNTIME_TO_RAM := 1
 # recoveries that boot on TB323FU (TWRP-16.0, OrangeFox R12.0) use a fully
 # expanded ramdisk: no aera-runtime.tar.xz, no early-init unpack step.
 AERA_USE_EXTREME_COMPRESSION := 0
+TW_INCLUDE_CRYPTO_FBE := true
+TW_INCLUDE_FBE_METADATA_DECRYPT := true
+TW_INCLUDE_CRYPTO := true
 
 AERA_VIRTUAL_AB_DEVICE := 1      # aera_build.mk 判等 "1"；原厂 ro.virtual_ab.enabled=true
 AERA_USE_DMCTL := 1              # 映射到 OF_USE_DMCTL，判等 1；dynamic partitions / super

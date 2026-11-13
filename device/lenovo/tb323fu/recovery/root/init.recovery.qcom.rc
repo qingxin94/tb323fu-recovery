@@ -37,7 +37,7 @@ service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.alloc
     group root graphics
     capabilities SYS_NICE
 
-service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-canoe_default_6_2.sh
+service post-boot-script /system/bin/sh -c /system/bin/init.kernel.post_boot-sun_default_6_2.sh
     user root
     group root
     oneshot
@@ -55,7 +55,8 @@ on init
     write /sys/class/backlight/panel0-backlight/brightness 200
     setprop sys.usb.configfs 1
     setprop prepdecrypt.setpatch true
-    start vendor.qseecomd
+    setprop keymaster_ver 4.x
+    setprop ro.crypto.dm_default_key.options_format.version 2
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
@@ -84,6 +85,12 @@ on fs
     mount ext4 /persist /mnt/vendor/persist bind
     exec_start aera-runtime-firmware
 
+    mkdir /mnt/vendor/spunvm 0771 system system
+    mount vfat /dev/block/bootdevice/by-name/spunvm /mnt/vendor/spunvm
+    mkdir /persist/secnvm 0770 system system
+    mkdir /persist/spudc 0770 system system
+    mkdir /persist/iar_db 0770 system system
+
 on property:twrp.modules.loaded=true
     wait /firmware/image/adsp.mdt 5
     wait /sys/kernel/boot_adsp/ssr 2
@@ -95,8 +102,19 @@ on property:twrp.modules.loaded=true
     restorecon --recursive /persist
     restorecon --recursive /mnt/vendor/persist
 
+    setprop twrp.module.handler_done true
+
     wait /sys/class/power_supply/battery 2
     start vendor.health-default
+    start vendor.qseecomd
+    start vendor.secretkeeper
+    start vendor.keymint
+    start vendor.keymint-spu-qti
+    start vendor.minkdaemon
+    start vendor.spdaemon
+    start vendor.sec_nvm
+    start vendor.spu_weaver
+    start vendor.gatekeeper_spu
     exec_start post-boot-script
 
 on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
@@ -150,3 +168,16 @@ service vendor.lenovo.battery /vendor/bin/hw/vendor.lenovo.hardware.battery-serv
     group system
     disabled
     seclabel u:r:recovery:s0
+
+on property:sys.powerctl=*
+    write /sys/class/leds/vibrator_l/activate 0
+    write /sys/class/leds/vibrator_r/activate 0
+    stop vendor.lenovo.vibrator
+
+import /system/etc/init/qseecomd.rc
+import /system/etc/init/prepdecrypt.rc
+import /system/etc/init/tb323fu-crypto-fix3.rc
+import /system/etc/init/hlosminkdaemon.rc
+import /system/etc/init/init.spdaemon.rc
+import /system/etc/init/init.vendor.qti.hardware.spu.service.rc
+import /system/etc/init/vendor.qti.hardware.vibrator.service.rc
