@@ -1,40 +1,45 @@
 #
-# Copyright (C) 2026 The AERA Recovery Project
+# AERA Recovery device tree - Lenovo Legion Y700 (TB323FU)
+# Platform: SM8850 / canoe / Android 16 / kernel 6.12.30-4k
+# All partition geometry is measured from the stock TB323_ZUXOS_2.0.12.088 package.
 #
-# SPDX-License-Identifier: Apache-2.0
-#
-# Lenovo Legion Y700 5th Gen (TB323FU) / SM8850 "canoe"
-# 所有数值均从原厂 TB323_ZUXOS_2.0.12.088 固件实测提取（GPT + rawprogram + super LP metadata）
-#
-
 DEVICE_PATH := device/lenovo/tb323fu
 
-# 构建容错
+# Build tolerance (minimal manifest)
 ALLOW_MISSING_DEPENDENCIES := true
 BUILD_BROKEN_DUP_RULES := true
 BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true
 BUILD_BROKEN_NINJA_USES_ENV_VARS += RTIC_MPGEN
 BUILD_BROKEN_PLUGIN_VALIDATION := soong-libaosprecovery_defaults soong-libguitwrp_defaults soong-libminuitwrp_defaults soong-vold_defaults
 
-# 架构
+# Architecture
 TARGET_ARCH := arm64
 TARGET_ARCH_VARIANT := armv8-a
 TARGET_CPU_ABI := arm64-v8a
 TARGET_CPU_VARIANT := generic
 TARGET_CPU_VARIANT_RUNTIME := oryon
+TARGET_2ND_ARCH := arm
+TARGET_2ND_ARCH_VARIANT := armv8-2a
+TARGET_2ND_CPU_ABI := armeabi-v7a
+TARGET_2ND_CPU_VARIANT := generic
+TARGET_2ND_CPU_VARIANT_RUNTIME := kryo
+TARGET_USES_64_BIT_BINDER := true
+TARGET_SUPPORTS_64_BIT_APPS := true
 
+# Power
 ENABLE_CPUSETS := true
 ENABLE_SCHEDBOOST := true
 
-# 平台（实测 vendor/build.prop：ro.board.platform=canoe / ro.product.board=baldur_prc_wifi）
+# Bootloader / platform
 PRODUCT_PLATFORM := canoe
-TARGET_BOOTLOADER_BOARD_NAME := TB323FU
+TARGET_BOOTLOADER_BOARD_NAME := canoe
 TARGET_NO_BOOTLOADER := true
+TARGET_NO_RADIOIMAGE := true
 TARGET_BOARD_PLATFORM := sm8850
 TARGET_BOARD_PLATFORM_GPU := qcom-adreno840
 QCOM_BOARD_PLATFORMS += sm8850
 
-# 内核（原厂 boot.img：Linux 6.12.30-android16-5，KMI 6.12，GKI header v4）
+# Kernel (stock boot.img Image: 6.12.30-android16-5-g1750f757fabe-ab13938768-4k)
 TARGET_KERNEL_ARCH := arm64
 TARGET_KERNEL_HEADER_ARCH := arm64
 BOARD_KERNEL_IMAGE_NAME := Image
@@ -44,7 +49,7 @@ TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/kernel
 BOARD_MKBOOTIMG_ARGS += --header_version $(BOARD_BOOT_HEADER_VERSION)
 BOARD_MKBOOTIMG_ARGS += --pagesize $(BOARD_KERNEL_PAGESIZE)
 BOARD_RAMDISK_USE_LZ4 := true
-
+BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true
 TARGET_KERNEL_VERSION := 6.12
 AERA_ROOT_MODULE_KERNELS := 6.12
 
@@ -57,154 +62,142 @@ AB_OTA_PARTITIONS := \
     vendor_boot \
     dtbo \
     vbmeta \
-    vbmeta_system
+    vbmeta_system \
+    vbmeta_vendor
 
-# 分区大小（GPT LBA × 4096 字节，实测）
-BOARD_BOOTIMAGE_PARTITION_SIZE := 100663296          # boot_a 24576 扇区 = 96 MiB
-BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 100663296  # vendor_boot_a 24576 扇区
-BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600     # recovery_a 25600 扇区 = 100 MiB
-BOARD_DTBOIMG_PARTITION_SIZE := 75497472            # dtbo_a 18432 扇区 = 72 MiB
-BOARD_INIT_BOOTIMAGE_PARTITION_SIZE := 8388608      # init_boot_a 2048 扇区
+# Partition sizes (measured from GPT / package super chunks)
+BOARD_BOOTIMAGE_PARTITION_SIZE := 100663296
+BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 100663296
+BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600
+BOARD_DTBOIMG_PARTITION_SIZE := 75497472
+BOARD_INIT_BOOTIMAGE_PARTITION_SIZE := 8388608
 BOARD_FLASH_BLOCK_SIZE := 131072
 
-# 动态分区（GPT：super LBA 8968–5251847 = 20 GiB）
+# Dynamic partitions: super = 20 GiB (LP block device size 0x500000000)
 BOARD_SUPER_PARTITION_SIZE := 21474836480
 BOARD_SUPER_PARTITION_GROUPS := qti_dynamic_partitions
-BOARD_QTI_DYNAMIC_PARTITIONS_SIZE := 21470642176   # super - 4 MiB 预留
+BOARD_QTI_DYNAMIC_PARTITIONS_SIZE := 21470642176
 BOARD_QTI_DYNAMIC_PARTITIONS_PARTITION_LIST := \
     system \
     system_ext \
     product \
     vendor \
-    odm
-
+    vendor_dlkm \
+    odm \
+    system_dlkm
 BOARD_PARTITION_LIST := $(call to-upper, $(BOARD_QTI_DYNAMIC_PARTITIONS_PARTITION_LIST))
-# 实测：super 内 system/system_ext/product/vendor/odm 全部为 ext4（非 erofs）
+# All logical partitions in this retail package are ext4 (verified 0xef53 superblock)
 $(foreach p, $(BOARD_PARTITION_LIST), $(eval BOARD_$(p)IMAGE_FILE_SYSTEM_TYPE := ext4))
 $(foreach p, $(BOARD_PARTITION_LIST), $(eval TARGET_COPY_OUT_$(p) := $(call to-lower, $(p))))
-
-BOARD_VENDOR_DLKMIMAGE_FILE_SYSTEM_TYPE := ext4
 BOARD_BUILD_VENDOR_DLKM_IMAGE := true
 BOARD_BUILD_SYSTEM_DLKM_IMAGE := true
-TARGET_COPY_OUT_VENDOR_DLKM := vendor_dlkm
-TARGET_COPY_OUT_SYSTEM_DLKM := system_dlkm
-TARGET_COPY_OUT_VENDOR := vendor
-TARGET_COPY_OUT_ODM := odm
 
-BOARD_SYSTEM_DLKMIMAGE_FILE_SYSTEM_TYPE := ext4
+# Filesystems
+BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
 TARGET_USERIMAGES_USE_EXT4 := true
 TARGET_USERIMAGES_USE_F2FS := true
-BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
+
+# Crypto
 BOARD_USES_METADATA_PARTITION := true
 BOARD_USES_QCOM_FBE_DECRYPTION := true
-
-# AVB
-BOARD_AVB_ENABLE := true
-BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
-
-# ===== 版本 / 补丁级别：按 AERA 官方 canoe 树范式固定 =====
-# 官方 android_device_oneplus_infiniti-AERA（同 sm8850/canoe、同 onekeymint 栈）写死
-#   PLATFORM_VERSION := 99.87.36 / PLATFORM_SECURITY_PATCH := 2099-12-31
-# 不让真机 Android 版本与补丁级别透传给安全世界：
-# keymint HAL 会把这些值作为 SetHalInfoRequest(os_version/os_patchlevel/vendor_patchlevel)
-# 发给 TEE TA，真机值(如 160000/202606)可能被 TA 判定越界而拒绝服务。
-PLATFORM_VERSION := 99.87.36
-PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
-PLATFORM_SECURITY_PATCH := 2099-12-31
-VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
-BOOT_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
-
-# Recovery 基本
-BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true
-TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
-TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
-TARGET_USES_LOGD := true
-
-# AERA 特性
-AERA_ENABLE_WLAN := true
-AERA_ENABLE_MOBILE_DATA := 0
-AERA_ENABLE_ROOT_MANAGER := 0
-AERA_ENABLE_EFISP := 1
 AERA_INCLUDE_CRYPTO := true
 AERA_INCLUDE_CRYPTO_FBE := true
 AERA_INCLUDE_FBE_METADATA_DECRYPT := true
 AERA_USE_FSCRYPT_POLICY := 2
+
+# Recovery
+TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
+TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
 AERA_INCLUDE_FASTBOOTD := true
 AERA_SKIP_ADDITIONAL_FSTAB := true
+AERA_UI_ADAPTIVE_RESOLUTION := true
 
+# Tools
 AERA_INCLUDE_LIBRESETPROP := true
 AERA_INCLUDE_LPDUMP := true
 AERA_INCLUDE_LPTOOLS := true
 AERA_INCLUDE_REPACKTOOLS := true
 AERA_INCLUDE_RESETPROP := true
+
+# Debug
+TARGET_USES_LOGD := true
 AERA_INCLUDE_LOGCAT := true
+TARGET_RECOVERY_DEVICE_MODULES += debuggerd
+TARGET_RECOVERY_DEVICE_MODULES += strace
+RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/debuggerd
+RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/strace
+
+# Display: 8.8" 3040x1904 165Hz, panel0-backlight
+AERA_BRIGHTNESS_PATH := "/sys/class/backlight/panel0-backlight/brightness"
+AERA_DEFAULT_BRIGHTNESS := 2047
+AERA_MAX_BRIGHTNESS := 4094
+AERA_SCREEN_H := 3040
+AERA_FRAMERATE := 165
+AERA_NO_SCREEN_BLANK := true
+AERA_SCREEN_BLANK_ON_BOOT := true
+AERA_THEME := portrait_hdpi
+TARGET_USES_VULKAN := true
+
+# Filesystem / storage
+RECOVERY_SDCARD_ON_DATA := true
+TARGET_USES_MKE2FS := true
+AERA_ENABLE_FS_COMPRESSION := true
 AERA_INCLUDE_FUSE_EXFAT := true
 AERA_INCLUDE_FUSE_NTFS := true
 AERA_INCLUDE_NTFS_3G := true
 AERA_NO_EXFAT_FUSE := true
-AERA_EXCLUDE_APEX := true
-AERA_USE_DMCTL := true
+
+# Version: never leak the retail patch level into the TEE HAL info
+PLATFORM_VERSION := 99.87.36
+PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
+PLATFORM_SECURITY_PATCH := 2099-12-31
+VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
+BOOT_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
+AERA_DEVICE_VERSION := Lenovo_Legion_Y700
+
+# Input haptics
 AERA_SUPPORT_INPUT_AIDL_HAPTICS := true
-AERA_ENABLE_FS_COMPRESSION := true
-AERA_THEME := portrait_hdpi
-AERA_NO_SCREEN_BLANK := true
-AERA_SCREEN_BLANK_ON_BOOT := true
-AERA_SCREEN_H := 3040
-AERA_FRAMERATE := 165
 
-# 屏幕：8.8" 3040×1904 165Hz
-
-# 设备标识
-# 默认语言：官方 catalog.json 自带 zh_CN 2745 条官方翻译
+# Misc
+TARGET_RECOVERY_QCOM_RTC_FIX := true
+AERA_EXCLUDE_APEX := true
+AERA_EXCLUDE_DEFAULT_USB_INIT := true
 AERA_DEFAULT_LANGUAGE := "zh_CN"
 AERA_EXTRA_LANGUAGES := true
+AERA_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
+AERA_USE_TOOLBOX := true
+AERA_ENABLE_WLAN := true
+AERA_ENABLE_MOBILE_DATA := 0
+AERA_ENABLE_ROOT_MANAGER := 0
+AERA_ENABLE_EFISP := 1
+AERA_INCLUDE_OMAPI := true
+AERA_ENABLE_FRP_WIPE := 1
+AERA_ENABLE_ABL_PRESERVATION := 1
+AERA_AB_DEVICE_WITH_RECOVERY_PARTITION := 1
+AERA_WORKAROUND_BACKUP_BUG := 1
+AERA_USE_AIDL_BOOT_CONTROL := 1
+AERA_FORCE_DATA_FORMAT_F2FS := 1
+AERA_USE_LZ4_COMPRESSION := 1
+AERA_DYNAMIC_FULL_SIZE := 21474836480
+AERA_NO_RELOAD_AFTER_DECRYPTION := 1
+AERA_FORCE_PREBUILT_KERNEL := 1
+AERA_NO_TREBLE_COMPATIBILITY_CHECK := 1
+# No fingerprint hardware on this tablet
+AERA_SUPPORT_FINGERPRINT := 0
 
-AERA_DEVICE_VERSION := Y700_5th_Gen
-AERA_MAINTAINER := TB323FU
-AERA_TARGET_DEVICES := TB323FU
+# ---- Module loading (dependency order from stock modules.dep) ----
+# Stage 1 (before decryption): display / touch / haptics / charger
+AERA_LOAD_VENDOR_MODULES := "panel_event_notifier.ko spi-msm-geni.ko i3c-master-msm-geni.ko nvt_36xxx.ko msm_kgsl.ko qmi_helpers.ko qcom_glink.ko qcom_glink_smem.ko qcom_smd.ko qcom_pdr_msg.ko pdr_interface.ko rproc_qcom_common.ko qti_pmic_glink.ko qcom-hv-haptics.ko swr_dlkm.ko swr_haptics_dlkm.ko aw882xx_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko"
+AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 
-# 其他
-TARGET_USES_MKE2FS := true
-TARGET_USES_VULKAN := true
-TARGET_RECOVERY_QCOM_RTC_FIX := true
+# Stage 2 (after FBE decryption): WiFi/BT (wcn7750)
+AERA_POST_DECRYPT_MODULES := "rfkill.ko smem-mailbox.ko wlan_firmware_service.ko cnss_prealloc.ko qcom_ramdump.ko qcom_smd.ko qcom_glink.ko qcom_glink_smem.ko rproc_qcom_common.ko pdr_interface.ko mhi.ko pci-msm-drv.ko pcie-pdc.ko cnss_plat_ipc_qmi_svc.ko cnss_utils.ko cnss_nl.ko cnss2.ko icnss2.ko repeater.ko redriver.ko rmnet_mem.ko gsim.ko ipam.ko cfg80211.ko qca_cld3_wcn7750.ko btfmcodec.ko btpower.ko bt_fm_swr.ko lpass_bt_swr_dlkm.ko machine_dlkm.ko"
 
-# ===== 内核模块加载（AERA kernel_module_loader 会按名单去 /vendor_dlkm/lib/modules 递归找）=====
-# 开机即加载：显示 / 触摸 / 触感 / 充电
-AERA_LOAD_VENDOR_MODULES := "panel_event_notifier.ko spi-msm-geni.ko i3c-master-msm-geni.ko \
-nvt_36xxx.ko msm_drm.ko msm_kgsl.ko \
-qmi_helpers.ko qcom_glink.ko qcom_glink_smem.ko qcom_smd.ko qcom_pdr_msg.ko \
-pdr_interface.ko rproc_qcom_common.ko qti_pmic_glink.ko hqsysfs.ko \
-qti_battery_charger.ko qti_battery_debug.ko qcom-hv-haptics.ko \
-swr_dlkm.ko swr_haptics_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko \
-qcom_glink_spss.ko qcom_spss.ko spss_utils.ko spcom.ko"
-# ↑ 第一阶段（解密前）加载，顺序依据各 .ko 的 modinfo depends=（实测，非猜）：
-#   panel_event_notifier 无依赖，却是 nvt_36xxx / msm_drm / qti_battery_charger 的公共依赖 → 必须第 1 个
-#   nvt_36xxx(modinfo: depends=panel_event_notifier) → msm_drm(modinfo: depends=...,nvt_36xxx,...)
-#   即触摸必须早于 DRM；而 SPI 控制器 spi-msm-geni 要早于 SPI 从设备 nvt_36xxx
-#   电池/振动链：qti_pmic_glink → qti_battery_charger → qcom-hv-haptics / swr_haptics_dlkm
+# Stage the installed ROM runtime (vendor/odm/system) in RAM and use it,
+# instead of shipping a hand-picked copy of the vendor blobs in ramdisk.
+AERA_COPY_RUNTIME_TO_RAM := 1
+AERA_USE_EXTREME_COMPRESSION := 1
 
-# FBE 解密之后再加载：WiFi / 蓝牙（本机 wcn7750，qca_cld3_wcn7750.ko 20MB，绝不进 ramdisk）
-AERA_POST_DECRYPT_MODULES := "rfkill.ko qmi_helpers.ko smem-mailbox.ko wlan_firmware_service.ko \
-cnss_prealloc.ko qcom_ramdump.ko qcom_pdr_msg.ko qcom_smd.ko qcom_glink.ko qcom_glink_smem.ko \
-rproc_qcom_common.ko pdr_interface.ko mhi.ko pci-msm-drv.ko pcie-pdc.ko \
-cnss_plat_ipc_qmi_svc.ko cnss_utils.ko cnss_nl.ko cnss2.ko icnss2.ko \
-repeater.ko redriver.ko lenovo_kallsyms.ko qti_pmic_glink.ko ucsi_qti_glink.ko \
-dwc3-msm.ko usb_f_gsi.ko rmnet_mem.ko qcom_va_minidump.ko gsim.ko ipam.ko \
-cfg80211.ko qca_cld3_wcn7750.ko \
-btfmcodec.ko btpower.ko bt_fm_swr.ko lpass_bt_swr_dlkm.ko machine_dlkm.ko"
-# ↑ 顺序不是随手排的：按 /vendor_dlkm/lib/modules/modules.dep 的依赖图做拓扑排序得出
-#   rfkill 必须第一个（它在 system_dlkm 里，不在 vendor_dlkm），否则 cfg80211/qca_cld3 会 insmod 失败
-#   qca_cld3_wcn7750 必须最后，它依赖上面 30 多个
-
-# 触感/输入
-AERA_SUPPORT_INPUT_FF_HAPTICS := true
-AERA_SUPPORT_INPUT_AIDL_HAPTICS := true
-AERA_INPUT_BLACKLIST := "hbtp_vm:qcom-hv-haptics"
-
-# 设备特有值（来自同平台参考树，需实机核对）
-AERA_BRIGHTNESS_PATH := "/sys/class/backlight/panel0-backlight/brightness"
-AERA_DEFAULT_BRIGHTNESS := 2048
-AERA_MAX_BRIGHTNESS := 4094
-AERA_DEFAULT_TIMEZONE := Asia/Shanghai
-
-# magiskboot 预编译为 4K 对齐，Android16 要求 16K，关闭该检查（check_elf_file 已给出的官方绕过方式）
+# Verified Boot
+BOARD_AVB_ENABLE := true
+BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true

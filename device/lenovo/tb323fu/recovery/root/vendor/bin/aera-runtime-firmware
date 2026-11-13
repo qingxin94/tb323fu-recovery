@@ -1,0 +1,12 @@
+#!/system/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Preserve the old early-firmware phase; staging does not load kernel modules.
+PATH=/system/bin:/sbin
+export PATH
+if [ -x /system/bin/aera-runtime-stage ]; then
+    exec /system/bin/aera-runtime-stage /vendor/etc/aera-runtime.json firmware
+fi
+slot=$(getprop ro.boot.slot_suffix)
+case "$slot" in _a|_b) ;; *) echo "AERA firmware: unknown boot slot" >&2; exit 1 ;; esac
+mkdir -p /firmware || exit 1
+exec mount -t vfat -o ro "/dev/block/bootdevice/by-name/modem${slot}" /firmware

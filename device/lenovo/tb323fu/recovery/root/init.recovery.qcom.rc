@@ -1,163 +1,74 @@
-# init.recovery.qcom.rc — Lenovo Legion Y700 5th Gen (TB323FU, canoe/sm8850)
-# 参考 11 台官方 AERA 树的同名文件，服务名/脚本名全部换成本机实测值
+# AERA recovery init for Lenovo TB323FU (SM8850 / canoe)
+# Uses the installed ROM's vendor runtime instead of a ramdisk copy of the blobs.
 
 import /init.recovery.usb.rc
 import /init.recovery.wifi.rc
-import /init.recovery.audio.rc
 
 on early-init
-    mount none /vendor/odm /odm bind
-    setprop keymaster_ver 4.x
-    setprop ro.crypto.dm_default_key.options_format.version 2
-    setprop ro.vendor.board.family f-canoe
-    setprop ro.vendor.qti.soc_name canoe
-    # 不在 early-init 硬设 vendor.gatekeeper.is_security_level_spu：
-    # prepdecrypt 会从真机 vendor build.prop 读真实值再 setprop（prepdecrypt.sh:393-396），
-    # 提前硬设会导致 SPU gatekeeper 在 qseecomd/mink 之前被拉起。
-    # Qualcomm Mapper5/SnapAlloc：让 Adreno EGL 与 KMS 共享 buffer
     setprop vendor.gralloc.enable_snapalloc true
+    # Decrypt through the TEE-backed rust gatekeeper, not through SPU NVM.
+    # The SPU NVM namespace is owned by the running Android and is not
+    # guaranteed to be ready this early; the stock value (=1) makes
+    # keystore2's gatekeeper call block on /dev/smcinvoke forever.
+    setprop vendor.gatekeeper.is_security_level_spu 0
+    start vendor.gatekeeper_default
 
-# 显示分配器：Adreno 渲染必须先有 gralloc-native buffer（根 rc 里起，早于 vendor 片段）
 service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
     class hal
     seclabel u:r:recovery:s0
-    user root
-    group root graphics
+    user system
+    group system graphics drmrpc
     capabilities SYS_NICE
 
-# 本机 post_boot 脚本（canoe 平台，6.2/6_2 两套后缀都在 vendor/bin 里）
 service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-canoe_default_6_2.sh
     user root
     group root
     oneshot
     seclabel u:r:recovery:s0
+    disabled
 
-on early-fs
-    write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
-    write /proc/sys/walt/sched_lib_mask_force 255
+# Stage modem / firmware early: WLAN and ADSP probe before twrp.modules.loaded.
+service aera-runtime-firmware /vendor/bin/aera-runtime-firmware
+    disabled
+    oneshot
+    user root
+    group root
+    seclabel u:r:recovery:s0
+    stdio_to_kmsg
 
 on init
     write /sys/class/backlight/panel0-backlight/brightness 200
     setprop sys.usb.configfs 1
-    # 基线：开启 prepdecrypt 的 setpatch 覆盖，让 release / security_patch 对齐真机
+    start vendor.boot-qti
+    start vendor.qseecomd
     setprop prepdecrypt.setpatch true
+
+on property:ro.boot.usbcontroller=*
+    setprop sys.usb.controller ${ro.boot.usbcontroller}
+    wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on fs
     wait /dev/block/platform/soc/${ro.boot.bootdevice}
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
+    mkdir /firmware 0755 root root
+    exec_start aera-runtime-firmware
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
-    # 固件分区：SPU 固件 spss1p.mdt 在这里，attach 期间必须保持挂载（基线在 on fs 挂载）
-    wait /dev/block/bootdevice/by-name/persist 10
-    wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 10
-    mkdir /firmware 0771 root root
-    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
-    symlink /firmware /vendor/firmware_mnt
-
-    # persist：iar_db / secnvm / spudc 是 SPU 密钥材料的落点（基线在 on fs 挂载）
-    mkdir /persist 0771 root root
-    mount ext4 /dev/block/bootdevice/by-name/persist /persist
-    mkdir /mnt/vendor/persist 0771 root root
-    mount ext4 /persist /mnt/vendor/persist bind
-
-    # 成品基线在 on fs 就起 boot HAL，注释原文：
-    # "PartitionManager queries BootControl while parsing recovery.fstab.
-    #  Starting this HAL after twrp.fstab.processed creates a circular wait and
-    #  leaves recovery on the first logo with no UI."
-    # 也就是必须在 fstab 解析前把 IBootControl/default 就绪，否则会循环等待卡在 logo。
-    start vendor.boot-qti
-
-    # Recovery does not run Android's normal post-fs metadata relabel pass.
-    # Virtual A/B state created by update_engine_sideload must inherit
-    # ota_metadata_file instead of unlabeled; otherwise Android can merge the
-    # COWs but cannot remove merge_stats after the first successful boot.
-on post-fs
-    mkdir /metadata/ota 0750 root system
-    mkdir /metadata/ota/snapshots 0750 root system
-    restorecon --recursive /metadata/ota
-
-on property:ro.boot.usbcontroller=*
-    setprop sys.usb.controller ${ro.boot.usbcontroller}
-    wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode
-    write /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode peripheral
-    wait /sys/class/udc/${ro.boot.usbcontroller} 1
-
 on property:twrp.modules.loaded=true
-    # ADSP 固件加载（PMIC）
-    wait /firmware/image/adsp.mdt 5
-    wait /sys/kernel/boot_adsp/ssr 2
+    # ADSP firmware for the PMIC / charger
+    wait /sys/kernel/boot_adsp/ssr
     write /sys/kernel/boot_adsp/ssr 1
-
-    # spunvm：SPU NVM 备份区
-    mkdir /mnt/vendor/spunvm 0660 system system
-    wait /dev/block/bootdevice/by-name/spunvm 5
-    mount vfat /dev/block/bootdevice/by-name/spunvm /mnt/vendor/spunvm
-
-    # persist 子目录（persist 本体已在 on fs 挂载）
-    mkdir /persist/secnvm 0770 system system
-    mkdir /persist/spudc 0770 system system
-    mkdir /persist/iar_db 0770 system system
-
-    # 不重打标签 init 会拒绝启动 /vendor/bin 下的服务
-    restorecon --recursive /vendor/bin
-    restorecon --recursive /vendor/lib64
-    restorecon --recursive /vendor/etc
-    restorecon --recursive /persist
-    restorecon --recursive /mnt/vendor/persist
-
-    # 安全链顺序严格对齐成品基线 ISR：
-    #   qseecomd → minkdaemon → 默认 TEE KeyMint → SPU KeyMint
-    #   → gatekeeper_default（先起 TEE 侧预热）→ spdaemon → sec_nvm → spu_weaver
-    # 之后 prepdecrypt 从真机 build.prop 读到 spu=1，触发
-    #   on property:vendor.gatekeeper.is_security_level_spu=1
-    #   → stop gatekeeper_default / start gatekeeper_spu + spu_weaver
-    start vendor.qseecomd
-    start vendor.minkdaemon
-    start vendor.keymint
-    start vendor.keymint-spu-qti
-    start vendor.gatekeeper_default
-    start vendor.spdaemon
-    start vendor.sec_nvm
-    start vendor.spu_weaver
-
-    # 以下不再额外启动 ISR 链里没有的 SPU 服务。
-    # 实测日志：spdaemon 报 spcom_wait_for_nvm_ready() ETIMEDOUT(-110)、
-    # Initial SP initialization failed、IAR is not activated。
-    # 成品基线在同一硬件上不出这个错，差异就是它没有提前起 vendor.qti.hardware.spu.service
-    # 与 vendor.secretkeeper——这两个会抢在 spdaemon 完成 NVM 初始化之前 attach SPU，
-    # 把 SPU 状态机打成失败态，进而让 mink/smcinvoke 通道没有可用的 TA listener。
-
-    wait /sys/class/power_supply/battery 2
+    wait /sys/class/power_supply/battery
     start vendor.health-default
-    start display_aidl_service
-    start touchscreen_hal_service
+    exec_start post-boot-script
 
-    # TWRP/AERA 的 vendor 模块处理完成握手（成品基线在此置位）
-    setprop twrp.module.handler_done true
-
-on property:twrp.fastboot.mode=1
-    start vendor.usb-hal
-
-# Gatekeeper / Weaver 后端选择（对齐成品基线）：SPU 型停默认、起 SPU；TEE 型反之
-on property:vendor.gatekeeper.is_security_level_spu=0
-    stop vendor.gatekeeper_spu
-    stop vendor.spu_weaver
-    start vendor.gatekeeper_default
-
-on property:vendor.gatekeeper.is_security_level_spu=1
-    stop vendor.gatekeeper_default
-    start vendor.gatekeeper_spu
-    start vendor.spu_weaver
-
-# prepdecrypt（基线 ISR 版）：挂载临时 system/vendor，对齐 release / security_patch，
-# 从 vendor build.prop 读取 SPU gatekeeper 判定，最后置 crypto.ready=1
+# Mount and snapshot the installed ROM runtime before anything consumes it.
 on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
     start prepdecrypt.vendor
 
+# KeyMint only after the vendor runtime and the security world are staged.
 on property:crypto.ready=1
-    restart keystore2
-    start display_aidl_service
+    start vendor.keymint
 
-# AERA UI 就绪标记（官方 11 台同款）
 on property:hwservicemanager.ready=true
     setprop sys.boot_completed 1

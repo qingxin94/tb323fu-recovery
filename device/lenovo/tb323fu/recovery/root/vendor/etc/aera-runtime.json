@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "name": "tb323fu",
+  "phases": {
+    "firmware": {
+      "partitions": [
+        {"name": "modem", "filesystems": ["vfat"]}
+      ],
+      "copies": [
+        {"source": "modem", "path": ".", "to": "modem"}
+      ],
+      "allowed_targets": ["/firmware", "/vendor/firmware_mnt"],
+      "bindings": [
+        {"from": "modem", "to": "/firmware"},
+        {"from": "modem", "to": "/vendor/firmware_mnt"}
+      ]
+    },
+    "post-decrypt": {
+      "ram_links": [
+        {"prefix": "/vendor/firmware_mnt", "phase": "firmware", "path": "modem"},
+        {"prefix": "/firmware", "phase": "firmware", "path": "modem"}
+      ],
+      "partitions": [
+        {"name": "vendor", "filesystems": ["ext4", "erofs"]},
+        {"name": "system", "filesystems": ["ext4", "erofs"], "content_roots": ["system", "."]},
+        {"name": "odm", "filesystems": ["ext4", "erofs"]},
+        {"name": "dsp", "filesystems": ["ext4"]}
+      ],
+      "copies": [
+        {"source": "vendor", "path": "lib64", "to": "vendor/lib64"},
+        {"source": "vendor", "path": "lib64/hw", "to": "vendor/lib64/hw", "contents": true, "optional": true},
+        {"source": "vendor", "path": "bin/hw", "to": "vendor/bin/hw", "contents": true, "optional": true},
+        {"source": "vendor", "path": "etc/init", "to": "vendor/etc/init", "contents": true, "optional": true},
+        {"source": "system", "paths": ["system/lib64/libbinder.so", "lib64/libbinder.so"], "to": "system/lib64/libbinder.so"},
+        {"source": "system", "paths": ["system/lib64/libbinder_ndk.so", "lib64/libbinder_ndk.so"], "to": "system/lib64/libbinder_ndk.so"},
+        {"source": "system", "paths": ["system/lib64/libc++.so", "lib64/libc++.so"], "to": "system/lib64/libc++.so"},
+        {"source": "system", "paths": ["system/lib64/libc.so", "lib64/libc.so"], "to": "system/lib64/libc.so", "optional": true},
+        {"source": "system", "paths": ["system/lib64/libm.so", "lib64/libm.so"], "to": "system/lib64/libm.so", "optional": true},
+        {"source": "system", "paths": ["system/lib64/libdl.so", "lib64/libdl.so"], "to": "system/lib64/libdl.so", "optional": true},
+        {"source": "system", "paths": ["system/lib64/liblog.so", "lib64/liblog.so"], "to": "system/lib64/liblog.so", "optional": true},
+        {"source": "system", "paths": ["system/lib64/libvndksupport.so", "lib64/libvndksupport.so"], "to": "system/lib64/libvndksupport.so", "optional": true},
+        {"source": "system", "paths": ["system/lib64/libapexsupport.so", "lib64/libapexsupport.so"], "to": "system/lib64/libapexsupport.so", "optional": true},
+        {"source": "odm", "path": "bin/hw", "to": "odm/bin/hw", "contents": true, "optional": true},
+        {"source": "odm", "path": "lib64", "to": "odm/lib64"},
+        {"source": "vendor", "path": "etc/wifi", "to": "vendor/etc/wifi", "contents": true},
+        {"source": "vendor", "path": "firmware", "to": "vendor/firmware", "optional": true},
+        {"source": "vendor", "path": "etc/display", "to": "vendor/etc/display", "contents": true, "optional": true},
+        {"source": "vendor", "path": "etc/ueventd.rc", "to": "vendor/etc/ueventd.rc", "optional": true},
+        {"source": "dsp", "path": ".", "to": "dsp"}
+      ],
+      "elf_roots": [
+        {"provided": "/vendor/bin/aera-runtime-firmware"}
+      ],
+      "library_search": [
+        {"snapshot": "system/lib64"},
+        {"source": "vendor", "path": "lib64"},
+        {"source": "odm", "path": "lib64"},
+        {"provided": "/vendor/lib64"},
+        {"provided": "/system/lib64"}
+      ],
+      "private_mounts": ["/odm"],
+      "allowed_targets": ["/vendor/aera-stock-lib64", "/vendor/aera-stock-odm-lib64", "/vendor/etc", "/vendor/dsp", "/vendor/firmware", "/odm/bin/hw", "/odm/lib64"],
+      "bindings": [
+        {"from": "vendor/lib64", "to": "/vendor/aera-stock-lib64"},
+        {"from": "odm/lib64", "to": "/vendor/aera-stock-odm-lib64"},
+        {"from": "system/lib64/libbinder.so", "to": "/vendor/aera-audio-abi/libbinder.so"},
+        {"from": "system/lib64/libbinder_ndk.so", "to": "/vendor/aera-audio-abi/libbinder_ndk.so"},
+        {"from": "system/lib64/libc++.so", "to": "/vendor/aera-audio-abi/libc++.so"},
+        {"from": "vendor/etc/wifi", "to": "/vendor/etc/wifi"},
+        {"from": "vendor/etc/display", "to": "/vendor/etc/display", "optional": true},
+        {"from": "vendor/etc/ueventd.rc", "to": "/vendor/etc/ueventd.rc", "optional": true},
+        {"from": "dsp", "to": "/vendor/dsp"}
+      ]
+    }
+  }
+}

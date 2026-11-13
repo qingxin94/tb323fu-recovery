@@ -1,29 +1,7 @@
-# init.recovery.wifi.rc — TB323FU (WCN7750)
-#
-# 照官方 macan 的写法（macan 与本机同为 WCN7750）：
-#   同一颗芯片不用 dodge 那种 CNSS2 PCIe 的 fs_ready 节点，而走 ICNSS/WPSS：
-#     /sys/kernel/icnss/wlan_en_delay  -> 1000
-#     /sys/kernel/icnss/wpss_boot      -> 1
-#   模块由 AERA 的 kernel_module_loader 从已装的 /vendor_dlkm 加载，ramdisk 里不放 20MB 的 ko。
-#
-# 依赖链（modules.dep 实测拓扑序，rfkill 必须最先，且它来自 system_dlkm 不在 vendor_dlkm）：
-#   rfkill -> qmi_helpers -> smem-mailbox -> wlan_firmware_service -> cnss_prealloc
-#   -> qcom_ramdump -> qcom_pdr_msg -> qcom_smd -> qcom_glink -> qcom_glink_smem
-#   -> rproc_qcom_common -> pdr_interface -> mhi -> pci-msm-drv -> pcie-pdc
-#   -> cnss_plat_ipc_qmi_svc -> cnss_utils -> cnss_nl -> cnss2 -> icnss2
-#   -> repeater -> redriver -> lenovo_kallsyms -> qti_pmic_glink -> ucsi_qti_glink
-#   -> dwc3-msm -> usb_f_gsi -> rmnet_mem -> qcom_va_minidump -> gsim -> ipam
-#   -> cfg80211 -> qca_cld3_wcn7750
-#
-# 固件在 WPSS 启动时才被需要，来自 pd-mapper 绑定后的 /vendor/firmware_mnt/image/wcn7750/
-# （wpss.mdt / bdwlan.bin）。所以顺序是：gatekeeper + aera-pd-mapper 先就绪 → 固件可见 → 再写 wpss_boot。
+# Recovery WLAN for TB323FU (WCN7750, cnss2 driver)
 
 on property:post.decrypt.modules=true
     setprop sys.aera.wlan.up 0
-    # AERA 的模块装载器此时已把 post-decrypt 清单里的模块 insmod 完
-    write /sys/kernel/icnss/wlan_en_delay 1000
-    write /sys/kernel/icnss/wpss_boot 1
-    start aera-wlan-ready
 
 on property:wifi.driver.ready=true
     mkdir /tmp/recovery 0777 root root
@@ -32,16 +10,17 @@ on property:wifi.driver.ready=true
 
 on property:sys.aera.wlan.up=1 && property:wifi.driver.ready=true
     setprop sys.aera.wlan.up 0
+    mkdir /tmp/recovery 0777 root root
+    mkdir /tmp/recovery/sockets 0777 root root
     start wpa_supplicant
 
 service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
     disabled
     seclabel u:r:recovery:s0
 
-# macan 同款：wlan0 出现后要在驱动 idle shutdown（约 250ms）之前把接口抢过来
-service aera-wlan-ready /system/bin/sh /system/bin/aera-wlan-ready.sh
-    user root
-    group root
+service aera-wlan-ready /system/bin/sh -c "until test -e /sys/class/net/wlan0; do sleep 1; done; setprop wifi.driver.ready true"
     disabled
     oneshot
+    user root
+    group root
     seclabel u:r:recovery:s0

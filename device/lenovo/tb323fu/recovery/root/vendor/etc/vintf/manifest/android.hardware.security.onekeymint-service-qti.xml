@@ -1,10 +1,8 @@
 <!--
     Input:
         vendor/qcom/proprietary/securemsm/onekeymint/android.hardware.security.onekeymint-service-qti.xml
-    secureclock / sharedsecret 由同一 onekeymint 进程内提供，按成品基线并入本 manifest，
-    不再单独声明（避免悬空 fqname）。
 -->
-<manifest version="8.0" type="device">
+<manifest version="9.0" type="device">
     <hal format="aidl">
         <name>android.hardware.security.keymint</name>
         <version>4</version>
@@ -14,13 +12,5 @@
         <name>android.hardware.security.keymint</name>
         <version>3</version>
         <fqname>IRemotelyProvisionedComponent/default</fqname>
-    </hal>
-    <hal format="aidl">
-        <name>android.hardware.security.secureclock</name>
-        <fqname>ISecureClock/default</fqname>
-    </hal>
-    <hal format="aidl">
-        <name>android.hardware.security.sharedsecret</name>
-        <fqname>ISharedSecret/default</fqname>
     </hal>
 </manifest>

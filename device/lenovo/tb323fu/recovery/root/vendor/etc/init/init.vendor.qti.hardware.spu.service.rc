@@ -1,7 +1,0 @@
-service vendor.qti.hardware.spu.service /vendor/bin/hw/vendor.qti.hardware.spu-service
-    class hal
-    user system
-    group system
-    disabled
-    shutdown critical
-    seclabel u:r:recovery:s0

@@ -1,6 +1,20 @@
-# TB323FU 设备属性（实测自原厂 vendor/build.prop）
+# TB323FU device properties (measured from the retail vendor image)
 ro.board.platform=canoe
 ro.product.board=baldur_prc_wifi
 ro.soc.manufacturer=QTI
 ro.hardware.egl=adreno
 ro.hardware.vulkan=adreno
+
+# Decrypt through the TEE-backed rust gatekeeper instead of SPU NVM.
+# The retail value (=1) makes keystore2 block on /dev/smcinvoke while the
+# Android-owned SPU NVM namespace is not available from recovery.
+vendor.gatekeeper.is_security_level_spu=0
+
+# Charger
+ro.charger.enable_suspend=true
+
+# Gatekeeper / KeyMint
+vendor.keymint.retry_timer=5
+
+# FUSE passthrough
+persist.sys.fuse.passthrough.enable=true

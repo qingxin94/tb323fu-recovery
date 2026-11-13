@@ -1,9 +1,0 @@
-# SSG QMIG 守护进程 —— TB323FU 上不存在 dodge 的 ssgtzd（全盘 0 命中），
-# 等价组件为 ssgqmigd；参数从原厂 vendor/etc/init/hw/init.qcom.rc 原样抠出
-service ssgqmigd64 /vendor/bin/ssgqmigd64
-    class late_start
-    user radio
-    group radio gps system
-    socket ssgqmig seqpacket 0660 radio inet
-    seclabel u:r:recovery:s0
-    oneshot

@@ -1,9 +1,11 @@
-# Default TEE KeyMint (/default). Started explicitly from the modules.loaded chain.
-# Aligned to proven TWRP baseline ISR.
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+# All rights reserved.
+# Confidential and Proprietary - Qualcomm Technologies, Inc. 
+
 
 service vendor.keymint /vendor/bin/hw/android.hardware.security.onekeymint-service-qti
     class early_hal
     user system
     group system drmrpc
-    disabled
-    seclabel u:r:recovery:s0
+# Started by init.recovery.qcom.rc on crypto.ready=1, after prepdecrypt
+# has mounted the installed vendor runtime and the security world is up.
