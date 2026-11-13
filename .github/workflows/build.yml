@@ -8,6 +8,9 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     # 机器资源设定保持原样：4 核 / 16GB 免费 runner，不清洗
@@ -62,7 +65,7 @@ jobs:
       run: |
         free -h
         df -h /
-        sudo dd if=/dev/zero of=/mnt/swapfile_extra bs=1M count=8192 status=none
+        sudo dd if=/dev/zero of=/mnt/swapfile_extra bs=1M count=16384 status=none
         sudo chmod 600 /mnt/swapfile_extra
         sudo mkswap /mnt/swapfile_extra
         sudo swapon /mnt/swapfile_extra
@@ -136,9 +139,20 @@ jobs:
         export ANDROID_JAVA_OPTS="-Xmx4g -Xms1g"
         export GOMEMLIMIT=12GiB
         export GOGC=50
+        rm -rf /tmp/statusrepo
+        git clone --depth=1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" /tmp/statusrepo >/dev/null 2>&1 || true
+        ( while true; do
+            { echo "== $(date -u) =="; df -h / | tail -1; free -m | awk '/Mem:/{print "mem used "$3"M avail "$7"M"}'; free -m | awk '/Swap:/{print "swap used "$3"M"}'; echo "--- ninja ---"; tail -c 1500 /tmp/build.log 2>/dev/null; } > /tmp/status.txt
+            if [ -d /tmp/statusrepo/.git ]; then
+              cp /tmp/status.txt /tmp/statusrepo/CI_STATUS.txt
+              cd /tmp/statusrepo && git -c user.email=ci@local -c user.name=ci commit -qam "status $(date -u +%H:%M)" && git push -q origin HEAD:ci-status --force; cd /mnt/work
+            fi
+            sleep 240
+          done ) >/dev/null 2>&1 &
+        STATUS=$!
         mka adbd recoveryimage -j2 2>&1 | tee /tmp/build.log
         rc=${PIPESTATUS[0]}
-        kill $MON 2>/dev/null || true
+        kill $MON $STATUS 2>/dev/null || true
         echo "=== build end rc=$rc ==="; df -h /; free -h
         exit $rc
 
