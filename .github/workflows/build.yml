@@ -97,7 +97,7 @@ jobs:
         set -o pipefail
         for i in $(seq 1 2000); do
           echo "=== sync attempt $i ==="
-          if repo sync -c --force-sync --no-clone-bundle --no-tags -j4 > /tmp/sync.log 2>&1; then
+          if repo sync -c --force-sync --no-clone-bundle --no-tags -j8 > /tmp/sync.log 2>&1; then
             echo "=== sync OK ==="
             break
           fi
@@ -123,6 +123,8 @@ jobs:
     - name: Build recovery
       run: |
         cd /mnt/work
+        free -h
+        df -h / /mnt
         set -o pipefail
         source build/envsetup.sh
         lunch twrp_tb323fu-bp2a-eng
