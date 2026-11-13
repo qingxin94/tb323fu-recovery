@@ -6,7 +6,7 @@ on init && property:ro.boot.product.vendor.sku=canoe
 
 service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
     disabled
-    class early_hal
+    class hal
     user system
     group system drmrpc
     seclabel u:r:recovery:s0

@@ -9,14 +9,19 @@
 #   * 分区扇区为 4 KiB（UFS 4K LBA），GPT LBA 数值与 rawprogram 一致
 #
 #<src>                                                <mnt_point>   <type>  <mnt_flags and options>              <fs_mgr_flags>
+#
+# 与成品基线 ISR 的 recovery 范式对齐：logical 分区不用 first_stage_mount / avb=。
+# first_stage_mount 是开机第一阶段（fs_mgr 在 init 里）的写法，recovery 不执行第一阶段；
+# avb= 会让 fs_mgr 走 vbmeta 校验链，recovery 侧无对应实现时会挂载失败。
+# slotselect 保留：super 是 slotted 的，需要选当前 slot。
 
-system                                                /system       ext4    ro,barrier=1,discard                 wait,slotselect,avb=vbmeta_system,logical,first_stage_mount
-system_ext                                            /system_ext   ext4    ro,barrier=1,discard                 wait,slotselect,avb=vbmeta_system,logical,first_stage_mount
-product                                               /product      ext4    ro,barrier=1,discard                 wait,slotselect,avb=vbmeta_system,logical,first_stage_mount
-vendor                                                /vendor       ext4    ro,barrier=1,discard                 wait,slotselect,avb=vbmeta,logical,first_stage_mount
-odm                                                   /odm          ext4    ro,barrier=1,discard                 wait,slotselect,logical,first_stage_mount,nofail
-vendor_dlkm                                           /vendor_dlkm  ext4    ro,barrier=1,discard                 wait,slotselect,avb=vbmeta,logical,first_stage_mount,nofail
-system_dlkm                                           /system_dlkm  ext4    ro,barrier=1,discard                 wait,slotselect,avb=vbmeta_system,logical,first_stage_mount,nofail
+system                                                /system       ext4    ro,barrier=1,discard                 wait,slotselect,logical
+system_ext                                            /system_ext   ext4    ro,barrier=1,discard                 wait,slotselect,logical
+product                                               /product      ext4    ro,barrier=1,discard                 wait,slotselect,logical
+vendor                                                /vendor       ext4    ro,barrier=1,discard                 wait,slotselect,logical
+odm                                                   /odm          ext4    ro,barrier=1,discard                 wait,slotselect,logical,nofail
+vendor_dlkm                                           /vendor_dlkm  ext4    ro,barrier=1,discard                 wait,slotselect,logical,nofail
+system_dlkm                                           /system_dlkm  ext4    ro,barrier=1,discard                 wait,slotselect,logical,nofail
 
 /dev/block/bootdevice/by-name/metadata                 /metadata     f2fs    noatime,nosuid,nodev,discard           wait,check,formattable,first_stage_mount
 /dev/block/bootdevice/by-name/userdata                 /data         f2fs    noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier,inlinecrypt  latemount,resize,wait,check,formattable,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption,metadata_encryption=aes-256-xts:wrappedkey_v0,quota,reservedsize=128M,sysfs_path=/sys/devices/platform/soc/1d84000.ufshc,checkpoint=fs

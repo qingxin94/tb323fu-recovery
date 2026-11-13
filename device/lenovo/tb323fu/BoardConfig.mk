@@ -102,6 +102,18 @@ BOARD_USES_QCOM_FBE_DECRYPTION := true
 BOARD_AVB_ENABLE := true
 BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
 
+# ===== 版本 / 补丁级别：按 AERA 官方 canoe 树范式固定 =====
+# 官方 android_device_oneplus_infiniti-AERA（同 sm8850/canoe、同 onekeymint 栈）写死
+#   PLATFORM_VERSION := 99.87.36 / PLATFORM_SECURITY_PATCH := 2099-12-31
+# 不让真机 Android 版本与补丁级别透传给安全世界：
+# keymint HAL 会把这些值作为 SetHalInfoRequest(os_version/os_patchlevel/vendor_patchlevel)
+# 发给 TEE TA，真机值(如 160000/202606)可能被 TA 判定越界而拒绝服务。
+PLATFORM_VERSION := 99.87.36
+PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
+PLATFORM_SECURITY_PATCH := 2099-12-31
+VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
+BOOT_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
+
 # Recovery 基本
 BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true
 TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888

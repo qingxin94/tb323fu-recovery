@@ -7,15 +7,15 @@ import /init.recovery.audio.rc
 
 on early-init
     mount none /vendor/odm /odm bind
-    # SPU / KeyMint 判定属性（与官方 qcom rc 一致）
     setprop keymaster_ver 4.x
     setprop ro.crypto.dm_default_key.options_format.version 2
     setprop ro.vendor.board.family f-canoe
     setprop ro.vendor.qti.soc_name canoe
-    setprop vendor.gatekeeper.is_security_level_spu 1
+    # 不在 early-init 硬设 vendor.gatekeeper.is_security_level_spu：
+    # prepdecrypt 会从真机 vendor build.prop 读真实值再 setprop（prepdecrypt.sh:393-396），
+    # 提前硬设会导致 SPU gatekeeper 在 qseecomd/mink 之前被拉起。
     # Qualcomm Mapper5/SnapAlloc：让 Adreno EGL 与 KMS 共享 buffer
     setprop vendor.gralloc.enable_snapalloc true
-    # 安全服务统一在 modules.loaded 链里按基线顺序启动，early-init 不再提前拉起
 
 # 显示分配器：Adreno 渲染必须先有 gralloc-native buffer（根 rc 里起，早于 vendor 片段）
 service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
@@ -60,6 +60,22 @@ on fs
     mkdir /mnt/vendor/persist 0771 root root
     mount ext4 /persist /mnt/vendor/persist bind
 
+    # 成品基线在 on fs 就起 boot HAL，注释原文：
+    # "PartitionManager queries BootControl while parsing recovery.fstab.
+    #  Starting this HAL after twrp.fstab.processed creates a circular wait and
+    #  leaves recovery on the first logo with no UI."
+    # 也就是必须在 fstab 解析前把 IBootControl/default 就绪，否则会循环等待卡在 logo。
+    start vendor.boot-qti
+
+    # Recovery does not run Android's normal post-fs metadata relabel pass.
+    # Virtual A/B state created by update_engine_sideload must inherit
+    # ota_metadata_file instead of unlabeled; otherwise Android can merge the
+    # COWs but cannot remove merge_stats after the first successful boot.
+on post-fs
+    mkdir /metadata/ota 0750 root system
+    mkdir /metadata/ota/snapshots 0750 root system
+    restorecon --recursive /metadata/ota
+
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
     wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode
@@ -89,25 +105,35 @@ on property:twrp.modules.loaded=true
     restorecon --recursive /persist
     restorecon --recursive /mnt/vendor/persist
 
-    # 安全链顺序对齐成品基线：qseecomd → mink → 默认 KM → SPU KM → SPU gatekeeper → spdaemon → sec_nvm → weaver
-    # 本机实测为 SPU Weaver 型（vendor.gatekeeper.is_security_level_spu=1），直接起 SPU 侧，不依赖属性触发补拉
+    # 安全链顺序严格对齐成品基线 ISR：
+    #   qseecomd → minkdaemon → 默认 TEE KeyMint → SPU KeyMint
+    #   → gatekeeper_default（先起 TEE 侧预热）→ spdaemon → sec_nvm → spu_weaver
+    # 之后 prepdecrypt 从真机 build.prop 读到 spu=1，触发
+    #   on property:vendor.gatekeeper.is_security_level_spu=1
+    #   → stop gatekeeper_default / start gatekeeper_spu + spu_weaver
     start vendor.qseecomd
     start vendor.minkdaemon
     start vendor.keymint
     start vendor.keymint-spu-qti
-    start vendor.gatekeeper_spu
+    start vendor.gatekeeper_default
     start vendor.spdaemon
     start vendor.sec_nvm
     start vendor.spu_weaver
 
-    # 本机额外 SPU 服务（基线无），排在主链之后
-    start vendor.qti.hardware.spu.service
-    start vendor.secretkeeper
+    # 以下不再额外启动 ISR 链里没有的 SPU 服务。
+    # 实测日志：spdaemon 报 spcom_wait_for_nvm_ready() ETIMEDOUT(-110)、
+    # Initial SP initialization failed、IAR is not activated。
+    # 成品基线在同一硬件上不出这个错，差异就是它没有提前起 vendor.qti.hardware.spu.service
+    # 与 vendor.secretkeeper——这两个会抢在 spdaemon 完成 NVM 初始化之前 attach SPU，
+    # 把 SPU 状态机打成失败态，进而让 mink/smcinvoke 通道没有可用的 TA listener。
 
     wait /sys/class/power_supply/battery 2
     start vendor.health-default
     start display_aidl_service
     start touchscreen_hal_service
+
+    # TWRP/AERA 的 vendor 模块处理完成握手（成品基线在此置位）
+    setprop twrp.module.handler_done true
 
 on property:twrp.fastboot.mode=1
     start vendor.usb-hal
