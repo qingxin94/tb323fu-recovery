@@ -130,6 +130,7 @@ jobs:
         df -h / /mnt
         set -o pipefail
         source build/envsetup.sh
+        export AERA_BUILD_DEVICE=tb323fu
         lunch twrp_tb323fu-bp2a-eng
         echo "=== build start ==="; df -h /; free -h
         ( while true; do echo "$(date -u +%H:%M:%S) $(df -h / | tail -1) | $(free -m | awk '/Mem:/{print "mem used "$3"M avail "$7"M"}') | $(free -m | awk '/Swap:/{print "swap used "$3"M"}')"; sleep 180; done ) > /tmp/resmon.log 2>&1 &

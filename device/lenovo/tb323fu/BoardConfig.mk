@@ -201,8 +201,8 @@ AERA_COPY_RUNTIME_TO_RAM := 1
 # expanded ramdisk: no aera-runtime.tar.xz, no early-init unpack step.
 AERA_USE_EXTREME_COMPRESSION := 0
 
-AERA_VIRTUAL_AB_DEVICE := true   # ro.virtual_ab.enabled=true, super + snapshots
-AERA_USE_DMCTL := true          # dynamic partitions / super
+AERA_VIRTUAL_AB_DEVICE := 1      # aera_build.mk 判等 "1"；原厂 ro.virtual_ab.enabled=true
+AERA_USE_DMCTL := 1              # 映射到 OF_USE_DMCTL，判等 1；dynamic partitions / super
 AERA_DRM_FIXED_REFRESH_RATE := 165  # 3040x1904 165Hz panel
 AERA_SUPPORT_INPUT_AIDL_HAPTICS_FQNAME := "vendor.lenovo.hardware.vibrator_dual"
 
