@@ -67,6 +67,19 @@ on fs
     symlink /dev/block/sde27 /dev/block/bootdevice/by-name/recovery_a
     symlink /dev/block/sde68 /dev/block/bootdevice/by-name/recovery_b
 
+    # TB323FU has no fbdev at all: /sys/class/graphics is absent, the panel is
+    # exposed only through DRM (card0-DSI-1).  ueventd does not create the DRM
+    # character devices on this board, so create them here before the recovery
+    # service starts.  Without them minui cannot open card0 and the screen
+    # stays black even though init is alive.
+    start aera-drm-nodes
+
+service aera-drm-nodes /system/bin/sh -c "mkdir -p /dev/dri; mknod /dev/dri/card0 c 226 0; mknod /dev/dri/renderD128 c 226 128; chmod 666 /dev/dri/card0 /dev/dri/renderD128"
+    user root
+    group root
+    oneshot
+    seclabel u:r:recovery:s0
+
 on property:twrp.modules.loaded=true
     # Mount firmware
     mkdir /firmware
