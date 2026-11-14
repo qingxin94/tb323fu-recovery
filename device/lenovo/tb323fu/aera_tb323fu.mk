@@ -45,8 +45,9 @@ AERA_ENABLE_WLAN := 1
 #
 
 # Feature switches (AERA R1.0): Root Manager (KSU/SukiSU assets), EFISP, ABL preservation
-# Root Manager 资产体积大，本版镜像已顶满 104857600 分区，先关闭；功能不砍，后续走压缩再开
-AERA_ENABLE_ROOT_MANAGER := 0
+# 与验证树原值一致：开启 Root Manager，root-providers 资产已随包（5.37 MB），
+# 镜像压缩后仍在 104857600 以内；不做任何功能裁剪。
+AERA_ENABLE_ROOT_MANAGER := 1
 AERA_ROOT_MODULE_KERNELS := 6.12
 AERA_ENABLE_EFISP := 1
 AERA_ENABLE_ABL_PRESERVATION := 1

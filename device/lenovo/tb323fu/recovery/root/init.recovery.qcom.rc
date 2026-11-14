@@ -171,3 +171,12 @@ import /system/etc/init/hlosminkdaemon.rc
 import /system/etc/init/init.spdaemon.rc
 import /system/etc/init/init.vendor.qti.hardware.spu.service.rc
 import /system/etc/init/vendor.qti.hardware.vibrator.service.rc
+
+# TB323FU: 白屏排查兜底 —— 即使 AERA UI 卡住，也把 recovery 日志周期性地
+# 落到 /persist，便于下次开机后取回（不依赖 adb）。
+service aera-log-mirror /system/bin/sh -c "mkdir -p /persist/aera; while true; do cat /tmp/recovery.log > /persist/aera/last-recovery.log 2>/dev/null; sleep 5; done"
+    user root
+    group root
+
+on fs
+    start aera-log-mirror
