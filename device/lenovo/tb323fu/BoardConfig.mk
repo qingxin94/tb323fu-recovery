@@ -112,6 +112,12 @@ AERA_INCLUDE_FASTBOOTD := true
 AERA_SKIP_ADDITIONAL_FSTAB := true
 AERA_UI_ADAPTIVE_RESOLUTION := false
 
+# 默认中文 + 开启 AERA 内置的 32 种语言（en/ar/bg/bn/ca/cs/de/el/es/fa/fr/he/hi/
+# hu/id/it/ja/ko/nl/no/pl/pt_BR/pt_PT/ro/ru/sr/sv/th/tr/uk/vi/zh_CN/zh_TW）。
+# 宏值必须带引号：Android.mk 直接拼 -DAERA_DEFAULT_LANGUAGE=$(...)，Soong 会 trim 引号。
+AERA_DEFAULT_LANGUAGE := "zh_CN"
+AERA_EXTRA_LANGUAGES := true
+
 # Tools
 AERA_INCLUDE_LIBRESETPROP := true
 AERA_INCLUDE_LPDUMP := true
