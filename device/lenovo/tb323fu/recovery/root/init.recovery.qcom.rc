@@ -54,6 +54,19 @@ on fs
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
+    # TB323FU: ueventd only creates six by-name links on this board
+    # (misc/oemowninfo/persist/ssd/xbl_b/xbl_config_b), although every
+    # partition exports PARTNAME.  Bind the GPT slots we need by number:
+    #   sda7  super        sde6  modem_a     sde48 modem_b
+    #   sde27 recovery_a   sde68 recovery_b  sde96 spunvm
+    symlink /dev/block/sda7  /dev/block/bootdevice/by-name/super
+    symlink /dev/block/sde6  /dev/block/bootdevice/by-name/modem
+    symlink /dev/block/sde6  /dev/block/bootdevice/by-name/modem_a
+    symlink /dev/block/sde48 /dev/block/bootdevice/by-name/modem_b
+    symlink /dev/block/sde96 /dev/block/bootdevice/by-name/spunvm
+    symlink /dev/block/sde27 /dev/block/bootdevice/by-name/recovery_a
+    symlink /dev/block/sde68 /dev/block/bootdevice/by-name/recovery_b
+
 on property:twrp.modules.loaded=true
     # Mount firmware
     mkdir /firmware
