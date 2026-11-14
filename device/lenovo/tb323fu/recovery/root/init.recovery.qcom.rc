@@ -32,6 +32,16 @@ import /init.recovery.usb.rc
 # 产生 4 个必然失败的 service；音频链在补齐这些二进制前不启用。
 # import /init.recovery.audio.rc
 
+on early-init
+    # 照抄可用 TWRP：wifi sockets 放 tmpfs，避免和 Android /data 抢目录
+    mkdir /data/vendor 0771 system system
+    mkdir /data/vendor/wifi 0770 system wifi
+    mkdir /data/vendor/wifi/sockets 0770 system wifi
+    mkdir /tmp/recovery 0777 root root
+    mkdir /tmp/recovery/sockets 0777 root root
+    chmod 0777 /tmp/recovery
+    chmod 0777 /tmp/recovery/sockets
+
 on early-fs
     write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
     write /proc/sys/walt/sched_lib_mask_force 255
@@ -45,16 +55,25 @@ service post-boot-script /system/bin/sh -c /system/bin/init.kernel.post_boot-sun
 on init
     setprop sys.usb.configfs 1
     setprop prepdecrypt.setpatch true
+    write /proc/sys/net/ipv4/ping_group_range "0 2147483647"
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
-    wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode
+    wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode 5
     write /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode peripheral
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on fs
-    wait /dev/block/platform/soc/${ro.boot.bootdevice}
+    wait /dev/block/platform/soc/${ro.boot.bootdevice} 10
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
+    wait /dev/block/bootdevice/by-name/persist 10
+    wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 10
+
+    # 照抄可用 TWRP 的启动顺序：PartitionManager 解析 recovery.fstab 时会查询
+    # BootControl，这个 HAL 必须在此之前起来。晚于 twrp.fstab.processed 启动
+    # 会形成循环等待，恢复停在首个 logo（白屏）、UI 和 adb 都不起来。
+    start vendor.boot-qti
+
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
     # TB323FU: ueventd only creates six by-name links on this board
@@ -89,9 +108,9 @@ on property:twrp.modules.loaded=true
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
     symlink /firmware /vendor/firmware_mnt
 
-    wait /firmware/image/adsp.mdt
+    wait /firmware/image/adsp.mdt 5
     # Load ADSP firmware for PMIC
-    wait /sys/kernel/boot_adsp/ssr
+    wait /sys/kernel/boot_adsp/ssr 2
     write /sys/kernel/boot_adsp/ssr 1
 
     # AERA: SOCCP (PMIC-GLINK charger/battery transport) is attached from the
