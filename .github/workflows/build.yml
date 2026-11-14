@@ -126,7 +126,7 @@ jobs:
     - name: Fix AERA recovery source for TB323FU
       run: |
         python3 /mnt/work/device/lenovo/tb323fu/scripts/fix_aera_recovery_source.py /mnt/work
-        grep -q "copySqliteDb" /mnt/work/bootable/recovery/twrp.cpp && { echo "copySqliteDb 仍存在"; exit 1; } || true
+        grep -q "android::keystore::copySqliteDb();" /mnt/work/bootable/recovery/twrp.cpp && { echo "copySqliteDb 调用仍存在"; exit 1; } || true
         grep -q "twrp.module.handler_done" /mnt/work/bootable/recovery/kernel_module_loader.cpp || { echo "handler wait 未打入"; exit 1; }
 
     - name: Build recovery
