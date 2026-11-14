@@ -31,7 +31,7 @@ service aera-wlan-ready /system/bin/sh -c "setprop wifi.driver.ready false; unti
     group root
     seclabel u:r:recovery:s0
 
-service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
+service wpa_supplicant /vendor/bin/hw/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
     disabled
     user root
     group root system

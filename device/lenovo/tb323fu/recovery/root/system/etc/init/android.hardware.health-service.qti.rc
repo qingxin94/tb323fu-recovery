@@ -1,4 +1,4 @@
-service vendor.health-default /system/bin/hw/android.hardware.health-service.qti
+service vendor.health-default /vendor/bin/hw/android.hardware.health-service.qti
     class hal
     user root
     group root
@@ -6,7 +6,7 @@ service vendor.health-default /system/bin/hw/android.hardware.health-service.qti
     file /dev/kmsg w
     seclabel u:r:recovery:s0
 
-service vendor.charger /system/bin/hw/android.hardware.health-service.qti --charger
+service vendor.charger /vendor/bin/hw/android.hardware.health-service.qti --charger
     class charger
     seclabel u:r:recovery:s0
     user root

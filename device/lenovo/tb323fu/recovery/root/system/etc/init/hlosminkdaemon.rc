@@ -2,7 +2,7 @@
 # All Rights Reserved.
 # Confidential and Proprietary - Qualcomm Technologies, Inc.
 
-service vendor.minkdaemon /system/bin/hlosminkdaemon
+service vendor.minkdaemon /vendor/bin/hw/hlosminkdaemon
     class late_start
     user system
     group system

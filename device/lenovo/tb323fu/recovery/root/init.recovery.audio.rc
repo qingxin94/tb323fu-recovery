@@ -1,0 +1,56 @@
+# AERA audio bring-up for Lenovo TB323FU (SM8850 canoe / AudioReach PAL)
+# Every service is disabled; /system/bin/aera-audio-bootstrap starts them on
+# demand after mounting the stock vendor/DSP/calibration data read-only:
+#   bridge -> bootstrap -> pd-mapper/dspservice/audioadsprpcd -> ADSP -> AGM
+service aera-pd-mapper /system/bin/aera-pd-mapper
+    class core
+    disabled
+    user system
+    group system
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /AERA/audio/abi:/AERA/audio/lib64:/vendor/lib64:/system/lib64
+
+service aera-dspservice /system/bin/aera-dspservice
+    class hal
+    disabled
+    user system
+    group system wakelock
+    capabilities BLOCK_SUSPEND
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /AERA/audio/abi:/AERA/audio/lib64:/vendor/lib64:/system/lib64
+    interface aidl vendor.qti.hardware.dsp.IDspService/default
+
+service aera-audioadsprpcd /system/bin/aera-audioadsprpcd audiopd adsp
+    class main
+    disabled
+    user media
+    group media
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /AERA/audio/abi:/AERA/audio/lib64:/vendor/lib64:/system/lib64
+
+service aera-agm-service /system/bin/aera-audio-service --tb323fu-stock-agm
+    class main
+    disabled
+    user root
+    group root system audio media wakelock
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /AERA/audio/abi:/AERA/audio/lib64:/vendor/lib64:/system/lib64
+    setenv ANDROID_ROOT /system
+    setenv ANDROID_DATA /data
+    interface aidl vendor.qti.hardware.agm.IAGM/default
+    interface aidl vendor.qti.hardware.pal.IPAL/default
+
+service aera-audio-bootstrap /system/bin/aera-audio-bootstrap
+    class core
+    disabled
+    oneshot
+    user root
+    group root system audio media wakelock
+    seclabel u:r:recovery:s0
+
+# Bring the kernel/audio stack up automatically once recovery userspace has
+# fully booted. Starting earlier (twrp.module.handler_done) overlapped with
+# TWRP's partition scan / /vendor mounts / FBE decryption and matched the random
+# tagged-pointer crashes observed during startup.
+on property:sys.boot_completed=1
+    start aera-audio-bootstrap

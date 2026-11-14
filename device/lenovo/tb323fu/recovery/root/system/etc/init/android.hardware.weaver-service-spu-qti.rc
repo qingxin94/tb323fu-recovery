@@ -4,7 +4,7 @@ on init && property:ro.boot.product.vendor.sku=pineapple
 on init && property:ro.boot.product.vendor.sku=sun
     enable vendor.spu_weaver
 
-service vendor.spu_weaver /system/bin/hw/android.hardware.weaver-service-spu-qti
+service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
     class early_hal
     user system
     group system drmrpc

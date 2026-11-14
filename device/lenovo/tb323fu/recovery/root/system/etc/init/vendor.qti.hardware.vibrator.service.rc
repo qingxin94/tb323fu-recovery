@@ -21,7 +21,7 @@ on boot
     chmod 0666 /sys/class/leds/vibrator_l/gain
     chmod 0666 /sys/class/leds/vibrator_l/double
 
-service vendor.qti.vibrator /system/bin/hw/vendor.qti.hardware.vibrator.service
+service vendor.qti.vibrator /vendor/bin/hw/vendor.qti.hardware.vibrator.service
     user system
     group system input
     seclabel u:r:recovery:s0

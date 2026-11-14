@@ -1,4 +1,4 @@
-service vendor.gatekeeper_spu /system/bin/hw/android.hardware.gatekeeper-service-spu-qti
+service vendor.gatekeeper_spu /vendor/bin/hw/android.hardware.gatekeeper-service-spu-qti
     class early_hal
     user system
     group system

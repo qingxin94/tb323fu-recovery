@@ -5,7 +5,7 @@
 on init
     start vendor.keymint
 
-service vendor.keymint /system/bin/hw/android.hardware.security.onekeymint-service-qti
+service vendor.keymint /vendor/bin/hw/android.hardware.security.onekeymint-service-qti
     class early_hal
     user system
     group system drmrpc

@@ -2,7 +2,7 @@
 # All rights reserved.
 # Confidential and Proprietary - Qualcomm Technologies, Inc. 
 
-service vendor.gatekeeper_default /system/bin/hw/android.hardware.gatekeeper-rust-service-qti
+service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
     class early_hal
     user system
     group system

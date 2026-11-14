@@ -1,0 +1,381 @@
+#!/system/bin/sh
+# Copyright (C) 2026 AERA Recovery Project contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# AERA audio bring-up for Lenovo TB323FU (SM8850 canoe / AudioReach PAL).
+# Round 2: mirrors the stock Android module order (machine_dlkm loads before the
+# AW882xx smart-PA components; the deferred probe is retried after the DSP is up)
+# and treats the Qualcomm binder helper daemons as optional so a single ABI
+# mismatch cannot block the whole audio stack.
+PATH=/system/bin:/sbin
+export PATH
+stock_root=/mnt/aera-stock
+vendor_root=${stock_root}/vendor
+audio_abi=/AERA/audio/abi
+audio_lib64=/AERA/audio/lib64
+lock=${stock_root}/.audio-lock
+slot_suffix="$(getprop ro.boot.slot_suffix)"
+log=/tmp/aera-audio.log
+mods=/tmp/vendor/lib/modules
+mkdir -p /tmp
+exec >>"${log}" 2>&1
+echo "AERA audio: bootstrap start $(date)"
+
+fail() {
+    echo "AERA audio: $*"
+    exit 1
+}
+
+case "$(getprop ro.product.device)" in
+    TB323FU|aera_TB323FU) ;;
+    *)
+        case "$(getprop ro.product.vendor.device)" in
+            TB323FU|aera_TB323FU) ;;
+            *) fail "this backend is only valid on Lenovo TB323FU" ;;
+        esac
+        ;;
+esac
+
+mkdir -p "${stock_root}" /firmware /tmp "${audio_abi}" "${audio_lib64}" 2>/dev/null || true
+chmod 0755 "${stock_root}" 2>/dev/null || true
+lock_attempt=0
+while ! mkdir "${lock}" 2>/dev/null; do
+    [ "$(getprop init.svc.aera-agm-service)" = running ] && exit 0
+    lock_attempt=$((lock_attempt + 1))
+    [ "${lock_attempt}" -ge 300 ] && fail "another bootstrap did not finish"
+    sleep 0.1
+done
+trap 'rmdir "${lock}" 2>/dev/null' EXIT
+
+find_partition() {
+    part="$1"
+    for candidate in \
+        "/dev/block/mapper/${part}${slot_suffix}" \
+        "/dev/block/mapper/${part}_a" \
+        "/dev/block/mapper/${part}_b"; do
+        [ -b "${candidate}" ] && { echo "${candidate}"; return 0; }
+    done
+    return 1
+}
+
+mount_read_only() {
+    part="$1"
+    target="$2"
+    grep -q " ${target} " /proc/mounts && return 0
+    source=""
+    find_attempt=0
+    while [ -z "${source}" ] && [ "${find_attempt}" -lt 100 ]; do
+        source="$(find_partition "${part}")"
+        [ -n "${source}" ] && break
+        find_attempt=$((find_attempt + 1))
+        sleep 0.1
+    done
+    [ -n "${source}" ] || return 1
+    mount -t erofs -o ro "${source}" "${target}" 2>/dev/null || \
+        mount -t ext4 -o ro,noload "${source}" "${target}" 2>/dev/null
+}
+
+vendor_is_mounted=0
+if grep -qE ' /vendor (ext4|erofs|f2fs) ' /proc/mounts; then
+    vendor_root=/vendor
+    vendor_is_mounted=1
+    echo "AERA audio: stock vendor partition already mounted at /vendor"
+else
+    mount_read_only vendor "${vendor_root}" || fail "could not mount stock vendor"
+fi
+
+if ! grep -q ' /vendor/dsp ' /proc/mounts; then
+    dsp="/dev/block/bootdevice/by-name/dsp${slot_suffix}"
+    [ -b "${dsp}" ] || dsp="/dev/block/by-name/dsp${slot_suffix}"
+    [ -b "${dsp}" ] || fail "the active DSP partition is missing"
+    mount -t ext4 -o ro,noload "${dsp}" /vendor/dsp || \
+        fail "could not mount the DSP module partition"
+fi
+[ -e /dsp ] || ln -s /vendor/dsp /dsp || \
+    fail "could not expose the stock /dsp path"
+
+for required_runtime in \
+    "${audio_abi}/libbinder.so" \
+    "${audio_abi}/libc++.so" \
+    "${audio_lib64}/libadsp_default_listener.so" \
+    "${audio_lib64}/libagmipcservice.so" \
+    "${audio_lib64}/libpalipcservice.so" \
+    "${audio_lib64}/libstream_contextproxy.so" \
+    "${audio_lib64}/libstream_common.so" \
+    "${audio_lib64}/libar-pal.so"; do
+    [ -s "${required_runtime}" ] || \
+        fail "missing bundled audio runtime ${required_runtime}"
+done
+
+bind_file_read_only() {
+    source_file="$1"
+    target_file="$2"
+    [ -f "${source_file}" ] || fail "missing stock file ${source_file}"
+    [ -e "${target_file}" ] || touch "${target_file}" || \
+        fail "could not create bind target ${target_file}"
+    if ! grep -q " ${target_file} " /proc/mounts; then
+        mount -o bind "${source_file}" "${target_file}" || \
+            fail "could not bind ${source_file}"
+        mount -o remount,bind,ro "${target_file}" 2>/dev/null
+    fi
+}
+
+
+# AERA-T10: stock PAL (AudioReach) expects the legacy flat mixer/resourcemanager
+# XMLs directly under /vendor/etc:
+#   /vendor/etc/mixer_paths_canoe_qrd.xml   (variant from snd_card_name)
+#   /vendor/etc/mixer_paths_canoe.xml       (variant-less fallback)
+# Stock Android creates that view at first boot; recovery does not, so PAL's
+# ResourceManager::init_audio fails (-22) and libc++abi terminates the AGM host
+# with SIGABRT. Build a tiny overlayfs view of /vendor/etc and add the flat
+# legacy names, without touching the read-only vendor partition.
+prepare_vendor_mixer_compat() {
+    [ -e /vendor/etc/mixer_paths_canoe_qrd.xml ] && return 0
+    sku=/vendor/etc/audio/sku_canoe
+    if [ ! -d "${sku}" ]; then
+        echo "AERA audio: WARN missing ${sku}; cannot create PAL mixer compat view"
+        return 0
+    fi
+    upper=/tmp/aera-vendor-etc-upper
+    work=/tmp/aera-vendor-etc-work
+    merged=/tmp/aera-vendor-etc-merged
+    mkdir -p "${upper}" "${work}" "${merged}" 2>/dev/null || true
+    chmod 0755 "${upper}" "${work}" "${merged}" 2>/dev/null || true
+    if grep -q " ${merged} overlay " /proc/mounts; then
+        echo "AERA audio: PAL mixer compat overlay already mounted"
+        return 0
+    fi
+    # Legacy flat names used by stock PAL ResourceManager.
+    for name in mixer_paths_canoe_qrd.xml resourcemanager_canoe_qrd.xml \
+                plugin_manager.xml audio_module_config_primary.xml \
+                mcs_defs_canoe_qrd.xml mixer_paths_canoe_qrd_wsa884x.xml; do
+        [ -f "${sku}/${name}" ] && ln -sf "${sku}/${name}" "${upper}/${name}" 2>/dev/null
+    done
+    # Variant-less fallbacks map to the QRD variant of this SKU.
+    [ -f "${sku}/mixer_paths_canoe_qrd.xml" ] && \
+        ln -sf "${sku}/mixer_paths_canoe_qrd.xml" "${upper}/mixer_paths_canoe.xml" 2>/dev/null
+    [ -f "${sku}/resourcemanager_canoe_qrd.xml" ] && \
+        ln -sf "${sku}/resourcemanager_canoe_qrd.xml" "${upper}/resourcemanager_canoe.xml" 2>/dev/null
+    if ! mount -t overlay overlay \
+        -o "lowerdir=/vendor/etc,upperdir=${upper},workdir=${work}" \
+        "${merged}" 2>/dev/null; then
+        echo "AERA audio: WARN overlayfs mount failed; PAL mixer_paths will stay missing"
+        return 0
+    fi
+    if ! mount -o bind "${merged}" /vendor/etc 2>/dev/null; then
+        echo "AERA audio: WARN could not bind mixer compat overlay onto /vendor/etc"
+        return 0
+    fi
+    # init runs with umask 077; keep /vendor/etc traversable for the wifi/media
+    # daemons that read configuration below it.
+    chmod 0755 /vendor/etc 2>/dev/null || true
+    if [ -e /vendor/etc/mixer_paths_canoe_qrd.xml ]; then
+        echo "AERA audio: vendor mixer compat overlay ready"
+    else
+        echo "AERA audio: WARN mixer compat overlay did not expose legacy names"
+    fi
+}
+
+if [ "${vendor_is_mounted}" = 1 ]; then
+    # Stock vendor already exposes /vendor/etc/audio, /vendor/etc/acdbdata,
+    # the flat mixer/resourcemanager paths used by PAL and the seccomp policy.
+    [ -d "${vendor_root}/etc/acdbdata" ] || fail "missing stock ACDB calibration"
+    echo "AERA audio: stock audio config/ACDB already visible under /vendor"
+else
+    [ -d "${vendor_root}/etc/audio" ] || fail "missing stock vendor /etc/audio"
+    if ! grep -q ' /vendor/etc/audio ' /proc/mounts; then
+        mkdir -p /vendor/etc/audio
+        mount -o bind "${vendor_root}/etc/audio" /vendor/etc/audio || \
+            fail "could not expose the stock audio configuration"
+        mount -o remount,bind,ro /vendor/etc/audio 2>/dev/null
+    fi
+    [ -d "${vendor_root}/etc/acdbdata" ] || fail "missing stock ACDB calibration"
+    mkdir -p /vendor/etc/acdbdata
+    if ! grep -q ' /vendor/etc/acdbdata ' /proc/mounts; then
+        mount -o bind "${vendor_root}/etc/acdbdata" /vendor/etc/acdbdata || \
+            fail "could not expose the stock ACDB calibration"
+        mount -o remount,bind,ro /vendor/etc/acdbdata 2>/dev/null
+    fi
+    for config in card-defs.xml backend_conf.xml mem_logger_config.xml usecaseKvManager.xml; do
+        source_config="${vendor_root}/etc/${config}"
+        [ -f "${source_config}" ] && \
+            bind_file_read_only "${source_config}" "/vendor/etc/${config}"
+    done
+    bind_file_read_only \
+        "${vendor_root}/etc/audio/sku_canoe/mixer_paths_canoe_qrd.xml" \
+        "/vendor/etc/mixer_paths_canoe_qrd.xml"
+    bind_file_read_only \
+        "${vendor_root}/etc/audio/sku_canoe/resourcemanager_canoe_qrd.xml" \
+        "/vendor/etc/resourcemanager_canoe_qrd.xml"
+    bind_file_read_only "${vendor_root}/etc/audio/sku_canoe/plugin_manager.xml" \
+        "/vendor/etc/plugin_manager.xml"
+    bind_file_read_only \
+        "${vendor_root}/etc/seccomp_policy/vendor.qti.hardware.dsp.policy" \
+        "/vendor/etc/seccomp_policy/vendor.qti.hardware.dsp.policy"
+fi
+
+prepare_vendor_mixer_compat
+
+if [ "${vendor_is_mounted}" = 0 ] && [ -d "${vendor_root}/lib/rfsa/adsp" ] &&
+   ! grep -q ' /vendor/lib/rfsa/adsp ' /proc/mounts; then
+    mkdir -p /vendor/lib/rfsa/adsp
+    mount -o bind "${vendor_root}/lib/rfsa/adsp" /vendor/lib/rfsa/adsp || \
+        fail "could not expose the stock RFSA modules"
+    mount -o remount,bind,ro /vendor/lib/rfsa/adsp 2>/dev/null
+fi
+
+if ! grep -q ' /firmware ' /proc/mounts; then
+    modem="/dev/block/bootdevice/by-name/modem${slot_suffix}"
+    [ -b "${modem}" ] || modem="/dev/block/by-name/modem${slot_suffix}"
+    [ -b "${modem}" ] || fail "the active modem firmware partition is missing"
+    mount -t vfat -o ro "${modem}" /firmware || \
+        fail "could not mount the ADSP firmware partition"
+fi
+if [ ! -e /vendor/firmware_mnt ]; then
+    mount -o bind /firmware /vendor/firmware_mnt || \
+        fail "could not expose ADSP firmware to stock vendor"
+fi
+
+mkdir -p /data/vendor/audio/acdbdata/delta /data/vendor/audio_dsp
+# Stock modules load firmware through ueventd (/vendor/firmware_mnt ->
+# /firmware); make sure that fallback view exists when /vendor is a real mount.
+if ! grep -q " /firmware " /proc/mounts; then
+    modem="/dev/block/bootdevice/by-name/modem${slot_suffix}"
+    [ -b "${modem}" ] || modem="/dev/block/by-name/modem${slot_suffix}"
+    if [ -b "${modem}" ]; then
+        mount -t vfat -o ro "${modem}" /firmware || fail "could not mount firmware"
+    fi
+fi
+mkdir -p /vendor/firmware_mnt 2>/dev/null || true
+if ! grep -q " /vendor/firmware_mnt " /proc/mounts; then
+    mount -o bind /firmware /vendor/firmware_mnt 2>/dev/null || true
+fi
+
+start_init_service() {
+    service="$1"
+    required="$2"
+    state="$(getprop "init.svc.${service}")"
+    [ "${state}" = running ] && return 0
+    setprop ctl.start "${service}"
+    attempt=0
+    while [ "$(getprop "init.svc.${service}")" != running ] && \
+          [ "${attempt}" -lt 50 ]; do
+        attempt=$((attempt + 1))
+        sleep 0.1
+    done
+    [ "$(getprop "init.svc.${service}")" = running ] && return 0
+    [ "${required}" = required ] && fail "init service ${service} did not start"
+    echo "AERA audio: optional service ${service} is unavailable"
+    return 0
+}
+
+start_adsp() {
+    adsp_remoteproc=""
+    for candidate in /sys/class/remoteproc/remoteproc*; do
+        [ -r "${candidate}/name" ] || continue
+        case "$(cat "${candidate}/name")" in
+            *remoteproc-adsp)
+                adsp_remoteproc="${candidate}"
+                break
+                ;;
+        esac
+    done
+    [ -n "${adsp_remoteproc}" ] || fail "could not find the ADSP remoteproc"
+    if [ "$(cat "${adsp_remoteproc}/state" 2>/dev/null)" != running ]; then
+        echo start > "${adsp_remoteproc}/state" || fail "could not boot the ADSP"
+    fi
+    attempt=0
+    while [ "$(cat "${adsp_remoteproc}/state" 2>/dev/null)" != running ] && \
+          [ "${attempt}" -lt 100 ]; do
+        attempt=$((attempt + 1))
+        sleep 0.1
+    done
+    [ "$(cat "${adsp_remoteproc}/state" 2>/dev/null)" = running ] || \
+        fail "the ADSP did not enter the running state"
+}
+
+wait_for_card() {
+    attempt=0
+    while [ ! -e /dev/snd/controlC0 ] && [ "${attempt}" -lt "$1" ]; do
+        attempt=$((attempt + 1))
+        sleep 0.1
+    done
+    [ -e /dev/snd/controlC0 ]
+}
+
+start_init_service aera-pd-mapper required
+# The stock recovery rc boots the ADSP (remoteproc) before aera-pd-mapper is
+# available, so the ADSP never registers the audio PD (PDR lookup -6, "q6
+# state is down"). Restart it once now that the PD mapper is ready.
+sleep 0.5
+if [ -e /sys/kernel/boot_adsp/ssr ]; then
+    echo "AERA audio: pd-mapper ready, restarting ADSP..."
+    echo 1 > /sys/kernel/boot_adsp/ssr 2>/dev/null || true
+fi
+adsp_ready=0
+attempt=0
+while [ "${attempt}" -lt 120 ]; do
+    attempt=$((attempt + 1))
+    state="$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)"
+    if [ "${state}" = running ] && \
+       ! dmesg 2>/dev/null | tail -40 | grep -q "q6 state is down"; then
+        adsp_ready=1
+        break
+    fi
+    sleep 0.1
+done
+echo "AERA audio: ADSP ready=${adsp_ready} (polls=${attempt})"
+# The fastrpc nodes are root:root 0600; the audio PD daemon runs as media.
+for node in /dev/fastrpc-lpass2000 /dev/fastrpc-adsp-secure; do
+    [ -e "${node}" ] && chmod 0666 "${node}" 2>/dev/null || true
+done
+start_init_service aera-dspservice optional
+for node in /dev/fastrpc-lpass2000 /dev/fastrpc-adsp-secure; do
+    [ -e "${node}" ] && chmod 0666 "${node}" 2>/dev/null || true
+done
+start_init_service aera-audioadsprpcd optional
+start_adsp
+sleep 2
+
+# The stock module order loads machine_dlkm before the AW882xx smart PA, so the
+# machine probe defers until the codec components exist; triggering the deferred
+# probe here (after the DSP is running) mirrors the stock bring-up.
+if ! wait_for_card 150; then
+    echo "AERA audio: sound card missing, retrying deferred machine probe"
+    for module in rfkill smem-mailbox cnss_utils hqsysfs aw882xx_dlkm btfmcodec spk_id_dlkm lpass_bt_swr_dlkm btpower btfm_slim_codec bt_fm_swr; do
+        grep -q "^${module} " /proc/modules && continue
+        for dir in /AERA/modules/audio "${mods}"; do
+            [ -f "${dir}/${module}.ko" ] || continue
+            /system/bin/insmod "${dir}/${module}.ko"
+            echo "AERA audio: insmod ${module} from ${dir} rc=$?"
+            break
+        done
+    done
+    sleep 1
+    # The LPASS/WCD codec components register only after the ADSP comes up, so
+    # a single probe can still defer. Retry the deferred probe for up to ~24 s.
+    probe_attempt=0
+    while [ "${probe_attempt}" -lt 12 ] && [ ! -e /dev/snd/controlC0 ]; do
+        probe_attempt=$((probe_attempt + 1))
+        if [ -e /sys/bus/platform/devices/soc:spf_core_platform:sound ]; then
+            echo "soc:spf_core_platform:sound" > /sys/bus/platform/drivers_probe 2>/dev/null
+        fi
+        sleep 2
+    done
+    echo "AERA audio: deferred probe attempts=${probe_attempt}"
+    wait_for_card 100 || fail "the Qualcomm machine sound card did not register"
+fi
+echo "AERA audio: sound card $(cat /proc/asound/cards | head -1)"
+
+start_init_service aera-agm-service required
+[ -f /tmp/aera-audio-volume ] || echo 60 > /tmp/aera-audio-volume 2>/dev/null || true
+echo 1 > /tmp/aera-pal-stream-type 2>/dev/null || true
+echo "AERA audio: TB323FU AGM backend is ready"
+
+# The WLAN loader and the audio bootstrap are both triggered by
+# twrp.module.handler_done; the first WLAN attempt can race with the audio module
+# loads and overlay mount. Re-trigger the stock WLAN bring-up now that the audio
+# stack is ready (idempotent; the loader exits quickly when wlan0 is already up).
+echo "AERA audio: re-triggering WLAN bring-up after audio init"
+setprop sys.aera.wlan.up 1
+

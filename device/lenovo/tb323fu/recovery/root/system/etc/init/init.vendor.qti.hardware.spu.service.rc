@@ -10,7 +10,7 @@ on boot && property:ro.boot.product.vendor.sku=sun
 on boot && property:ro.vendor.board.family=f-canoe && property:ro.vendor.qti.soc_name=canoe
     enable vendor.qti.hardware.spu.service
 
-service vendor.qti.hardware.spu.service /system/bin/hw/vendor.qti.hardware.spu-service
+service vendor.qti.hardware.spu.service /vendor/bin/hw/vendor.qti.hardware.spu-service
     class hal
     user system
     group system
