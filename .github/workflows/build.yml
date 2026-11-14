@@ -157,7 +157,7 @@ jobs:
             sleep 240
           done ) >/dev/null 2>&1 &
         STATUS=$!
-        mka adbd recoveryimage -j2 2>&1 | tee /tmp/build.log
+        mka adbd recoveryimage -j4 2>&1 | tee /tmp/build.log
         rc=${PIPESTATUS[0]}
         kill $MON $STATUS 2>/dev/null || true
         echo "=== build end rc=$rc ==="; df -h /; free -h

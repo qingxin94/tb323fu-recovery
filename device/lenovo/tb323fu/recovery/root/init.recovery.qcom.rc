@@ -33,6 +33,7 @@ import /init.recovery.usb.rc
 # import /init.recovery.audio.rc
 
 on early-init
+    write /dev/kmsg "AERA_STAGE=early_init"
     # 照抄可用 TWRP：wifi sockets 放 tmpfs，避免和 Android /data 抢目录
     mkdir /data/vendor 0771 system system
     mkdir /data/vendor/wifi 0770 system wifi
@@ -53,6 +54,8 @@ service post-boot-script /system/bin/sh -c /system/bin/init.kernel.post_boot-sun
     seclabel u:r:recovery:s0
 
 on init
+    write /dev/kmsg "AERA_STAGE=init"
+    start aera-drm-nodes
     setprop sys.usb.configfs 1
     setprop prepdecrypt.setpatch true
     write /proc/sys/net/ipv4/ping_group_range "0 2147483647"
@@ -64,6 +67,7 @@ on property:ro.boot.usbcontroller=*
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on fs
+    write /dev/kmsg "AERA_STAGE=fs_begin"
     wait /dev/block/platform/soc/${ro.boot.bootdevice} 10
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
     wait /dev/block/bootdevice/by-name/persist 10
@@ -73,6 +77,7 @@ on fs
     # BootControl，这个 HAL 必须在此之前起来。晚于 twrp.fstab.processed 启动
     # 会形成循环等待，恢复停在首个 logo（白屏）、UI 和 adb 都不起来。
     start vendor.boot-qti
+    write /dev/kmsg "AERA_STAGE=bootqti_started"
 
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
@@ -88,13 +93,15 @@ on fs
     symlink /dev/block/sde96 /dev/block/bootdevice/by-name/spunvm
     symlink /dev/block/sde27 /dev/block/bootdevice/by-name/recovery_a
     symlink /dev/block/sde68 /dev/block/bootdevice/by-name/recovery_b
+    write /dev/kmsg "AERA_STAGE=gpt_links_done"
+    setprop sys.usb.config adb
+    start adbd
 
     # TB323FU has no fbdev at all: /sys/class/graphics is absent, the panel is
     # exposed only through DRM (card0-DSI-1).  ueventd does not create the DRM
     # character devices on this board, so create them here before the recovery
     # service starts.  Without them minui cannot open card0 and the screen
     # stays black even though init is alive.
-    start aera-drm-nodes
 
 service aera-drm-nodes /system/bin/sh -c "mkdir -p /dev/dri; mknod /dev/dri/card0 c 226 0; mknod /dev/dri/renderD128 c 226 128; chmod 666 /dev/dri/card0 /dev/dri/renderD128"
     user root
@@ -190,3 +197,6 @@ import /system/etc/init/hlosminkdaemon.rc
 import /system/etc/init/init.spdaemon.rc
 import /system/etc/init/init.vendor.qti.hardware.spu.service.rc
 import /system/etc/init/vendor.qti.hardware.vibrator.service.rc
+
+on boot
+    write /dev/kmsg "AERA_STAGE=boot"
