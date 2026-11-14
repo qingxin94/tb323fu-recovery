@@ -25,111 +25,82 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-import /init.recovery.wifi.rc
-import /init.recovery.usb.rc
-# 本包 system 内没有 aera-pd-mapper / aera-dspservice / aera-audioadsprpcd /
-# aera-audio-service 四个音频守护进程（stock 与验证树均无），导入该 rc 只会
-# 产生 4 个必然失败的 service；音频链在补齐这些二进制前不启用。
-# import /init.recovery.audio.rc
-
 on early-init
-    write /dev/kmsg "AERA_STAGE=early_init"
-    # 照抄可用 TWRP：wifi sockets 放 tmpfs，避免和 Android /data 抢目录
+    # cfg80211 is a vendor module but depends on the GKI rfkill module, which
+    # is not present in the stock vendor_boot recovery module list.
+    insmod /lib/modules/rfkill.ko
+    insmod /lib/modules/cfg80211.ko
     mkdir /data/vendor 0771 system system
     mkdir /data/vendor/wifi 0770 system wifi
     mkdir /data/vendor/wifi/sockets 0770 system wifi
-    mkdir /tmp/recovery 0777 root root
-    mkdir /tmp/recovery/sockets 0777 root root
-    chmod 0777 /tmp/recovery
-    chmod 0777 /tmp/recovery/sockets
 
 on early-fs
     write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
     write /proc/sys/walt/sched_lib_mask_force 255
 
-service post-boot-script /system/bin/sh -c /system/bin/init.kernel.post_boot-sun_default_6_2.sh
+service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-sun_default_6_2.sh
     user root
     group root
     oneshot
     seclabel u:r:recovery:s0
 
 on init
-    write /dev/kmsg "AERA_STAGE=init"
-    start aera-drm-nodes
     setprop sys.usb.configfs 1
     setprop prepdecrypt.setpatch true
     write /proc/sys/net/ipv4/ping_group_range "0 2147483647"
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
-    wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode 5
+    wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode
     write /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode peripheral
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on fs
-    write /dev/kmsg "AERA_STAGE=fs_begin"
     wait /dev/block/platform/soc/${ro.boot.bootdevice} 10
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
+
+    # Wait for physical UFS block devices to avoid race conditions with early multi-LUN probing
     wait /dev/block/bootdevice/by-name/persist 10
     wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 10
 
-    # 照抄可用 TWRP 的启动顺序：PartitionManager 解析 recovery.fstab 时会查询
-    # BootControl，这个 HAL 必须在此之前起来。晚于 twrp.fstab.processed 启动
-    # 会形成循环等待，恢复停在首个 logo（白屏）、UI 和 adb 都不起来。
+    # PartitionManager queries BootControl while parsing recovery.fstab.
+    # Starting this HAL after twrp.fstab.processed creates a circular wait and
+    # leaves recovery on the first logo with no UI.
     start vendor.boot-qti
-    write /dev/kmsg "AERA_STAGE=bootqti_started"
 
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
 
-    # TB323FU: ueventd only creates six by-name links on this board
-    # (misc/oemowninfo/persist/ssd/xbl_b/xbl_config_b), although every
-    # partition exports PARTNAME.  Bind the GPT slots we need by number:
-    #   sda7  super        sde6  modem_a     sde48 modem_b
-    #   sde27 recovery_a   sde68 recovery_b  sde96 spunvm
-    symlink /dev/block/sda7  /dev/block/bootdevice/by-name/super
-    symlink /dev/block/sde6  /dev/block/bootdevice/by-name/modem
-    symlink /dev/block/sde6  /dev/block/bootdevice/by-name/modem_a
-    symlink /dev/block/sde48 /dev/block/bootdevice/by-name/modem_b
-    symlink /dev/block/sde96 /dev/block/bootdevice/by-name/spunvm
-    symlink /dev/block/sde27 /dev/block/bootdevice/by-name/recovery_a
-    symlink /dev/block/sde68 /dev/block/bootdevice/by-name/recovery_b
-    write /dev/kmsg "AERA_STAGE=gpt_links_done"
-    setprop sys.usb.config adb
-    start adbd
-
-    # TB323FU has no fbdev at all: /sys/class/graphics is absent, the panel is
-    # exposed only through DRM (card0-DSI-1).  ueventd does not create the DRM
-    # character devices on this board, so create them here before the recovery
-    # service starts.  Without them minui cannot open card0 and the screen
-    # stays black even though init is alive.
-
-service aera-drm-nodes /system/bin/sh -c "mkdir -p /dev/dri; mknod /dev/dri/card0 c 226 0; mknod /dev/dri/renderD128 c 226 128; chmod 666 /dev/dri/card0 /dev/dri/renderD128"
-    user root
-    group root
-    oneshot
-    seclabel u:r:recovery:s0
-
-on property:twrp.modules.loaded=true
-    # Mount firmware
-    mkdir /firmware
+    # Mount firmware immediately
+    mkdir /firmware 0771 root root
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
     symlink /firmware /vendor/firmware_mnt
 
+    # Mount persist immediately for SPU & WiFi MAC
+    mkdir /persist 0771 root root
+    mount ext4 /dev/block/bootdevice/by-name/persist /persist
+    mkdir /mnt/vendor/persist 0771 root root
+    mount ext4 /persist /mnt/vendor/persist bind
+
+    # Setup Wi-Fi sockets in tmpfs (isolated from Android /data)
+    mkdir /tmp/recovery 0777 root root
+    mkdir /tmp/recovery/sockets 0777 root root
+    chmod 0777 /tmp/recovery
+    chmod 0777 /tmp/recovery/sockets
+
+# Recovery does not run Android's normal post-fs metadata relabel pass.  Make
+# sure Virtual A/B state created by update_engine_sideload inherits
+# ota_metadata_file instead of unlabeled; otherwise Android can merge the COWs
+# but cannot remove merge_stats after the first successful boot.
+on post-fs
+    mkdir /metadata/ota 0750 root system
+    mkdir /metadata/ota/snapshots 0750 root system
+    restorecon --recursive /metadata/ota
+
+on property:twrp.modules.loaded=true
     wait /firmware/image/adsp.mdt 5
     # Load ADSP firmware for PMIC
     wait /sys/kernel/boot_adsp/ssr 2
     write /sys/kernel/boot_adsp/ssr 1
-
-    # AERA: SOCCP (PMIC-GLINK charger/battery transport) is attached from the
-    # AERA recovery process itself (see TWFunc::RunStartupScript); doing it
-    # here would need the dynamically allocated /sys/class/remoteproc index,
-    # which is not stable across boots.
-
-    # sec_nvm requires persist partition.
-    mkdir /persist 0771 system system
-    mount ext4 /dev/block/bootdevice/by-name/persist /persist
-    mkdir /mnt/vendor/persist 0660 system system
-    mount ext4 /persist /mnt/vendor/persist bind
 
     mkdir /persist/secnvm 0770 system system
     mkdir /persist/spudc 0770 system system
@@ -137,37 +108,103 @@ on property:twrp.modules.loaded=true
 
     mkdir /persist/iar_db 0770 system system
 
+    wait /dev/block/bootdevice/by-name/spunvm 5
     mount vfat /dev/block/bootdevice/by-name/spunvm /mnt/vendor/spunvm
 
     start vendor.qti.vibrator
 
-    # Restore SELinux labels for vendor binaries so that init can
-    # perform the correct domain transition when starting services.
-    # Without this, binaries under /vendor/bin get labeled as
-    # u:object_r:rootfs:s0 and init refuses to start them.
     restorecon --recursive /vendor/bin
     restorecon --recursive /vendor/lib64
     restorecon --recursive /vendor/etc
+    restorecon --recursive /persist
+    restorecon --recursive /mnt/vendor/persist
 
     start vendor.qseecomd
-    start vendor.secretkeeper
+    start vendor.minkdaemon
     start vendor.keymint
     start vendor.keymint-spu-qti
-    start vendor.minkdaemon
-    start vendor.health-default
-    start vendor.boot-qti
     start vendor.gatekeeper_default
-    start vendor.gatekeeper_spu
     start vendor.spdaemon
     start vendor.sec_nvm
     start vendor.spu_weaver
-    # No init-level wait for /sys/class/power_supply/battery: SOCCP is
-    # attached by the AERA process after init has finished, so a wait here
-    # would only delay boot. The AERA status bar polls the node every 10s.
+
+    wait /sys/class/power_supply/battery 2
 
     setprop twrp.module.handler_done true
 
-    # umount /firmware
+on property:crypto.ready=1
+    restart keystore2
+
+service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
+    class early_hal
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.gatekeeper_spu /vendor/bin/hw/android.hardware.gatekeeper-service-spu-qti
+    class early_hal
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
+    class early_hal
+    user system
+    group system drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+
+service recovery-wifi-init /system/bin/sh /system/bin/recovery-wifi-init.sh
+    user root
+    group root wifi inet
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
+
+service qrtr-ns /vendor/bin/qrtr-ns -f 1
+    user root
+    group root
+    disabled
+    seclabel u:r:recovery:s0
+
+service rmt_storage /vendor/bin/rmt_storage
+    user root
+    group root
+    disabled
+    seclabel u:r:recovery:s0
+
+service cnss-daemon /vendor/bin/cnss-daemon -n -l
+    user root
+    group root wifi inet
+    disabled
+    seclabel u:r:recovery:s0
+
+service wpa_supplicant /vendor/bin/hw/wpa_supplicant \
+    -Dnl80211 -iwlan0 -c/vendor/etc/wifi/wpa_supplicant.conf \
+    -O/tmp/recovery/sockets
+    user root
+    group root wifi inet
+    disabled
+    seclabel u:r:recovery:s0
+
+on property:vendor.gatekeeper.is_security_level_spu=0
+    stop vendor.gatekeeper_spu
+    stop vendor.spu_weaver
+    start vendor.gatekeeper_default
+
+on property:vendor.gatekeeper.is_security_level_spu=1
+    stop vendor.gatekeeper_default
+    start vendor.gatekeeper_spu
+    start vendor.spu_weaver
+
+service prepdecrypt.vendor /system/bin/sh /system/bin/prepdecrypt.sh
+    user root
+    group root
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
 
 on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
     start prepdecrypt.vendor
@@ -183,20 +220,3 @@ on property:sys.powerctl=*
 
 on property:vendor.sys.listeners.registered=true
     setprop sys.boot_completed 1
-# 全包与 stock 内都没有 vendor.ssgtzd 的 service 定义，保留这行只会出现
-# "no such service" 日志；此处停用。
-#    start vendor.ssgtzd
-
-
-# --- TB323FU additions kept from the previous port (imports only; the boot
-# --- ordering above is the one proven to reach the UI on this device).
-import /system/etc/init/qseecomd.rc
-import /system/etc/init/prepdecrypt.rc
-import /system/etc/init/tb323fu-crypto-fix3.rc
-import /system/etc/init/hlosminkdaemon.rc
-import /system/etc/init/init.spdaemon.rc
-import /system/etc/init/init.vendor.qti.hardware.spu.service.rc
-import /system/etc/init/vendor.qti.hardware.vibrator.service.rc
-
-on boot
-    write /dev/kmsg "AERA_STAGE=boot"
