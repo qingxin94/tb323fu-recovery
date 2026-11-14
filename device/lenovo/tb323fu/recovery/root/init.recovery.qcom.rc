@@ -27,7 +27,10 @@
 
 import /init.recovery.wifi.rc
 import /init.recovery.usb.rc
-import /init.recovery.audio.rc
+# 本包 system 内没有 aera-pd-mapper / aera-dspservice / aera-audioadsprpcd /
+# aera-audio-service 四个音频守护进程（stock 与验证树均无），导入该 rc 只会
+# 产生 4 个必然失败的 service；音频链在补齐这些二进制前不启用。
+# import /init.recovery.audio.rc
 
 on early-fs
     write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
@@ -154,7 +157,9 @@ on property:sys.powerctl=*
 
 on property:vendor.sys.listeners.registered=true
     setprop sys.boot_completed 1
-    start vendor.ssgtzd
+# 全包与 stock 内都没有 vendor.ssgtzd 的 service 定义，保留这行只会出现
+# "no such service" 日志；此处停用。
+#    start vendor.ssgtzd
 
 
 # --- TB323FU additions kept from the previous port (imports only; the boot
