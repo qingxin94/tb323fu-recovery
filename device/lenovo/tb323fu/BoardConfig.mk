@@ -193,8 +193,23 @@ AERA_SUPPORT_FINGERPRINT := 0
 
 # ---- Module loading (dependency order from stock modules.dep) ----
 # Stage 1 (before decryption): display / touch / haptics / charger
+# spcom / spss_utils / stm_st54se_gpio / nxp-nci / adsp_loader_dlkm / haptic and
+# their full dependency closure (qcom_spss, qcom_sysmon, qcom_glink_spss,
+# smcinvoke_dlkm, snd_event_dlkm, spf_core_dlkm, q6_pdr_dlkm, q6_notifier_dlkm,
+# gpr_dlkm) are staged into recovery/root/vendor/lib/modules together with the
+# stock modules.dep, so libmodprobe can resolve the chain by name.
 AERA_LOAD_VENDOR_MODULES := "panel_event_notifier.ko spi-msm-geni.ko i3c-master-msm-geni.ko nvt_36xxx.ko msm_kgsl.ko qmi_helpers.ko qcom_glink.ko qcom_glink_smem.ko qcom_smd.ko qcom_pdr_msg.ko pdr_interface.ko rproc_qcom_common.ko qti_pmic_glink.ko qcom-hv-haptics.ko swr_dlkm.ko swr_haptics_dlkm.ko aw882xx_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko adsp_loader_dlkm.ko spcom.ko spss_utils.ko stm_st54se_gpio.ko nxp-nci.ko"
 AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
+
+# Load them from the ramdisk before /vendor and /vendor_dlkm are mounted.
+# SPU's IAR-ready event is only ever delivered to the notifier spss_utils
+# registers while it probes, and weaver's read waits 30 s for that event.  A
+# probe that happens after the event was already raised waits out the 30 s and
+# fails every time - which is what keystore2's watchdog then reports as
+# getHardwareInfo() never returning.  Loading from ramdisk in
+# PartitionManager's fstab pass puts the probe ahead of the SPU power-up.
+TW_LOAD_PREBUILT_MODULES_AT_FIRST := true
+
 
 # Stage 2 (after FBE decryption): WiFi/BT (wcn7750)
 AERA_POST_DECRYPT_MODULES := "rfkill.ko smem-mailbox.ko wlan_firmware_service.ko cnss_prealloc.ko qcom_ramdump.ko qcom_smd.ko qcom_glink.ko qcom_glink_smem.ko rproc_qcom_common.ko pdr_interface.ko mhi.ko pci-msm-drv.ko pcie-pdc.ko cnss_plat_ipc_qmi_svc.ko cnss_utils.ko cnss_nl.ko cnss2.ko icnss2.ko repeater.ko redriver.ko rmnet_mem.ko gsim.ko ipam.ko cfg80211.ko qca_cld3_wcn7750.ko btfmcodec.ko btpower.ko bt_fm_swr.ko lpass_bt_swr_dlkm.ko machine_dlkm.ko"

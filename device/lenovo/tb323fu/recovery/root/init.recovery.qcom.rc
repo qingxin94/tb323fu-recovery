@@ -38,7 +38,12 @@ on early-fs
     write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
     write /proc/sys/walt/sched_lib_mask_force 255
 
-service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-sun_default_6_2.sh
+# TB323FU is canoe (SM8850). The sun_6_2 script is for SM8750 and writes WALT
+# tunables the canoe kernel does not have (it wants cluster0/sched_*_updownmigrate
+# instead of global sched_upmigrate/downmigrate), so nearly every write failed and
+# the clusters were left on the performance governor at their highest clock while
+# Qualcomm's idle driver kept idle CPUs powered. That is the heat.
+service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-canoe_default_6_2.sh
     user root
     group root
     oneshot
@@ -86,6 +91,15 @@ on fs
     mkdir /tmp/recovery/sockets 0777 root root
     chmod 0777 /tmp/recovery
     chmod 0777 /tmp/recovery/sockets
+
+    # The service was declared but never started, so the stock post-boot script
+    # never ran.  It is the only thing that hands the CPU clusters to WALT/hispeed
+    # and sets scaling_governor to schedutil, and that lets Qualcomm's idle driver
+    # power down idle CPUs and scales the DDR/LLCC buses.  Without it the kernel
+    # keeps the performance governor the bootloader left on every core, at its
+    # highest clock and voltage, and no idle CPU is ever parked - a recovery that
+    # sits on the logo then free-runs and the tablet gets hot within a minute.
+    start post-boot-script
 
 # Recovery does not run Android's normal post-fs metadata relabel pass.  Make
 # sure Virtual A/B state created by update_engine_sideload inherits
