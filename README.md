@@ -39,7 +39,9 @@ fastboot reboot recovery
 | 电池电量显示 | ✅ 已配置 | 按 SM8850 标准 Qualcomm power_supply 路径配置 |
 | 屏幕分辨率 | ✅ 已确认 | 物理面板 3040x1904（横版平板） |
 | 触摸屏 | ✅ 已配置 | Novatek NT36523，运行时从真机 vendor_dlkm 加载 nvt_36xxx.ko |
-| 预编译 kernel | ✅ 已内置 | `prebuilt/kernel`，MD5 `2c6bc3464ff61f35e2d5a83f1a6302ff` |
+| 预编译 kernel | ✅ 仓库内置（可选） | `prebuilt/kernel`，MD5 `2c6bc3464ff61f35e2d5a83f1a6302ff`；只作参考/启动实验，**不参与 `recovery.img` 构建** |
+
+> `recovery.img` 的 `kernel_size` 为 0，内核由 boot 分区提供；`prebuilt/kernel` 不会被塞进 recovery 镜像。
 
 ## 无触摸时的操作方式
 
