@@ -231,7 +231,12 @@ TW_INCLUDE_CRYPTO := true
 
 AERA_VIRTUAL_AB_DEVICE := 1      # aera_build.mk 判等 "1"；原厂 ro.virtual_ab.enabled=true
 AERA_USE_DMCTL := 1              # 映射到 OF_USE_DMCTL，判等 1；dynamic partitions / super
-AERA_DRM_FIXED_REFRESH_RATE := 165  # 3040x1904 165Hz panel
+# The panel's preferred mode is 120 Hz and the 165 Hz mode is a DMS (Dynamic
+# Mode Switch) target.  Asking for 165 on the first frame makes
+# dsi_display_prepare fail with rc=-22 ("DMS not supported on first frame"), so
+# the first atomic commit never gets a completed fence, the UI blocks on it and
+# the screen stays at the panel's blank white.  Stay on the preferred mode.
+AERA_DRM_FIXED_REFRESH_RATE := 120
 AERA_SUPPORT_INPUT_AIDL_HAPTICS_FQNAME := "vendor.lenovo.hardware.vibrator_dual"
 
 # Verified Boot
