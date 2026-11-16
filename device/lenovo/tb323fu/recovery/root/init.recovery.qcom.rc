@@ -1,58 +1,47 @@
 # Copyright (c) 2017-2018,2020-2021 The Linux Foundation. All rights reserved.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in the
-#       documentation and/or other materials provided with the distribution.
-#     * Neither the name of The Linux Foundation nor
-#       the names of its contributors may be used to endorse or promote
-#       products derived from this software without specific prior written
-#       permission.
+# AERA recovery init for Lenovo TB323FU (Canoe / SM8850)
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NON-INFRINGEMENT ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Stock recovery.img has kernel_size = 0; recovery mode runs on the kernel
+# from the boot partition.  That g1750 kernel loads the vendor_dlkm modules
+# through CONFIG_MODVERSIONS __versions CRC matching, so recovery stays
+# kernel-less and does not replace or patch any vendor module.
 #
+
+import /init.recovery.wifi.rc
+import /init.recovery.audio.rc
+import /vendor/etc/init/aera-crypto.rc
 
 on early-init
-    # cfg80211 is a vendor module but depends on the GKI rfkill module, which
-    # is not present in the stock vendor_boot recovery module list.
-    insmod /lib/modules/rfkill.ko
-    insmod /lib/modules/cfg80211.ko
-    mkdir /data/vendor 0771 system system
-    mkdir /data/vendor/wifi 0770 system wifi
-    mkdir /data/vendor/wifi/sockets 0770 system wifi
+    # Enable Qualcomm's Mapper5/SnapAlloc path before the allocator starts.
+    setprop vendor.gralloc.enable_snapalloc true
 
-on early-fs
-    write /proc/sys/walt/sched_lib_name "recovery,Updater,updater,update_engine_sideload"
-    write /proc/sys/walt/sched_lib_mask_force 255
+service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
+    class core
+    disabled
+    user system
+    group system graphics
+    seclabel u:r:recovery:s0
 
-# TB323FU is canoe (SM8850). The sun_6_2 script is for SM8750 and writes WALT
-# tunables the canoe kernel does not have (it wants cluster0/sched_*_updownmigrate
-# instead of global sched_upmigrate/downmigrate), so nearly every write failed and
-# the clusters were left on the performance governor at their highest clock while
-# Qualcomm's idle driver kept idle CPUs powered. That is the heat.
-service post-boot-script /system/bin/sh -c /vendor/bin/init.kernel.post_boot-canoe_default_6_2.sh
+# AERA_USE_AIDL_BOOT_CONTROL needs the installed QTI boot HAL.  It is a
+# vendor service, so no .ko or vendor library is copied into this tree.
+service vendor.boot-qti /vendor/bin/hw/android.hardware.boot-service.qti
+    class early_hal
+    disabled
     user root
     group root
-    oneshot
     seclabel u:r:recovery:s0
+
+on property:twrp.modules.loaded=true
+    # msm_kgsl/msm_drm are loaded by AERA before this property is set.
+    start aera-graphics-allocator
+    start vendor.qseecomd
+    start vendor.gatekeeper_default
+    start vendor.keymint
+    start vendor.boot-qti
 
 on init
     setprop sys.usb.configfs 1
-    setprop prepdecrypt.setpatch true
-    write /proc/sys/net/ipv4/ping_group_range "0 2147483647"
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
@@ -61,176 +50,19 @@ on property:ro.boot.usbcontroller=*
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on fs
-    wait /dev/block/platform/soc/${ro.boot.bootdevice} 10
+    wait /dev/block/platform/soc/${ro.boot.bootdevice}
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
 
-    # Wait for physical UFS block devices to avoid race conditions with early multi-LUN probing
-    wait /dev/block/bootdevice/by-name/persist 10
-    wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 10
-
-    # PartitionManager queries BootControl while parsing recovery.fstab.
-    # Starting this HAL after twrp.fstab.processed creates a circular wait and
-    # leaves recovery on the first logo with no UI.
-    start vendor.boot-qti
-
-    write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
-
-    # Mount firmware immediately
-    mkdir /firmware 0771 root root
-    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro
-    symlink /firmware /vendor/firmware_mnt
-
-    # Mount persist immediately for SPU & WiFi MAC
-    mkdir /persist 0771 root root
-    mount ext4 /dev/block/bootdevice/by-name/persist /persist
-    mkdir /mnt/vendor/persist 0771 root root
-    mount ext4 /persist /mnt/vendor/persist bind
-
-    # Setup Wi-Fi sockets in tmpfs (isolated from Android /data)
-    mkdir /tmp/recovery 0777 root root
-    mkdir /tmp/recovery/sockets 0777 root root
-    chmod 0777 /tmp/recovery
-    chmod 0777 /tmp/recovery/sockets
-
-    # The service was declared but never started, so the stock post-boot script
-    # never ran.  It is the only thing that hands the CPU clusters to WALT/hispeed
-    # and sets scaling_governor to schedutil, and that lets Qualcomm's idle driver
-    # power down idle CPUs and scales the DDR/LLCC buses.  Without it the kernel
-    # keeps the performance governor the bootloader left on every core, at its
-    # highest clock and voltage, and no idle CPU is ever parked - a recovery that
-    # sits on the logo then free-runs and the tablet gets hot within a minute.
-    start post-boot-script
-
-# Recovery does not run Android's normal post-fs metadata relabel pass.  Make
-# sure Virtual A/B state created by update_engine_sideload inherits
-# ota_metadata_file instead of unlabeled; otherwise Android can merge the COWs
-# but cannot remove merge_stats after the first successful boot.
-on post-fs
-    mkdir /metadata/ota 0750 root system
-    mkdir /metadata/ota/snapshots 0750 root system
-    restorecon --recursive /metadata/ota
-
-on property:twrp.modules.loaded=true
-    wait /firmware/image/adsp.mdt 5
-    # Load ADSP firmware for PMIC
-    wait /sys/kernel/boot_adsp/ssr 2
-    write /sys/kernel/boot_adsp/ssr 1
-
-    mkdir /persist/secnvm 0770 system system
-    mkdir /persist/spudc 0770 system system
-    mkdir /mnt/vendor/spunvm 0660 system system
-
-    mkdir /persist/iar_db 0770 system system
-
-    wait /dev/block/bootdevice/by-name/spunvm 5
-    mount vfat /dev/block/bootdevice/by-name/spunvm /mnt/vendor/spunvm
-
-    start vendor.qti.vibrator
-
-    restorecon --recursive /vendor/bin
-    restorecon --recursive /vendor/lib64
-    restorecon --recursive /vendor/etc
-    restorecon --recursive /persist
-    restorecon --recursive /mnt/vendor/persist
-
-    start vendor.qseecomd
-    start vendor.minkdaemon
-    start vendor.keymint
-    start vendor.keymint-spu-qti
-    start vendor.gatekeeper_default
-    start vendor.spdaemon
-    start vendor.sec_nvm
-    start vendor.spu_weaver
-
-    wait /sys/class/power_supply/battery 2
-
-    setprop twrp.module.handler_done true
-
-on property:crypto.ready=1
-    restart keystore2
-
-service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
-    class early_hal
-    user system
-    group system
+service console /system/bin/sh
+    class core
+    console
     disabled
-    seclabel u:r:recovery:s0
+    user shell
+    group shell log readproc
+    seclabel u:r:shell:s0
+    setenv HOSTNAME console
+    shutdown critical
 
-service vendor.gatekeeper_spu /vendor/bin/hw/android.hardware.gatekeeper-service-spu-qti
-    class early_hal
-    user system
-    group system
-    disabled
-    seclabel u:r:recovery:s0
-
-service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
-    class early_hal
-    user system
-    group system drmrpc
-    disabled
-    seclabel u:r:recovery:s0
-
-service recovery-wifi-init /system/bin/sh /system/bin/recovery-wifi-init.sh
-    user root
-    group root wifi inet
-    disabled
-    oneshot
-    seclabel u:r:recovery:s0
-
-service qrtr-ns /vendor/bin/qrtr-ns -f 1
-    user root
-    group root
-    disabled
-    seclabel u:r:recovery:s0
-
-service rmt_storage /vendor/bin/rmt_storage
-    user root
-    group root
-    disabled
-    seclabel u:r:recovery:s0
-
-service cnss-daemon /vendor/bin/cnss-daemon -n -l
-    user root
-    group root wifi inet
-    disabled
-    seclabel u:r:recovery:s0
-
-service wpa_supplicant /vendor/bin/hw/wpa_supplicant \
-    -Dnl80211 -iwlan0 -c/vendor/etc/wifi/wpa_supplicant.conf \
-    -O/tmp/recovery/sockets
-    user root
-    group root wifi inet
-    disabled
-    seclabel u:r:recovery:s0
-
-on property:vendor.gatekeeper.is_security_level_spu=0
-    stop vendor.gatekeeper_spu
-    stop vendor.spu_weaver
-    start vendor.gatekeeper_default
-
-on property:vendor.gatekeeper.is_security_level_spu=1
-    stop vendor.gatekeeper_default
-    start vendor.gatekeeper_spu
-    start vendor.spu_weaver
-
-service prepdecrypt.vendor /system/bin/sh /system/bin/prepdecrypt.sh
-    user root
-    group root
-    disabled
-    oneshot
-    seclabel u:r:recovery:s0
-
-on property:ro.crypto.state=encrypted && property:ro.boot.dynamic_partitions=true
-    start prepdecrypt.vendor
-
-on property:sys.powerctl=*
-    write /sys/class/leds/vibrator_l/activate 0
-    write /sys/class/leds/vibrator_l/state 0
-    write /sys/class/leds/vibrator_l/duration 0
-    write /sys/class/leds/vibrator_r/activate 0
-    write /sys/class/leds/vibrator_r/state 0
-    write /sys/class/leds/vibrator_r/duration 0
-    stop vendor.qti.vibrator
-
-on property:vendor.sys.listeners.registered=true
-    setprop sys.boot_completed 1
+on init && property:ro.debuggable=1
+    start console
+#

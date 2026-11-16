@@ -1,27 +1,23 @@
 #
-# Copyright (C) 2026 The AERA Recovery Project
+# AERA Recovery product configuration for Lenovo TB323FU
 #
 # SPDX-License-Identifier: Apache-2.0
-#
-# Lenovo Legion Y700 5th Gen (TB323FU)
-#
-# 注意：recovery/root/** 会被 AERA 构建自动打进 ramdisk，
-# 绝对不要在这里写源路径指向 recovery/root 的 PRODUCT_COPY_FILES，
-# 否则 soong 在 build/soong/fsgen/ 下解析成 ../../recovery/root/...
-# 会直接报 "is outside of the source root" 并中断构建。
 #
 
 LOCAL_PATH := device/lenovo/tb323fu
 
-# API level（Android 16）
+# Shipping API
 BOARD_SHIPPING_API_LEVEL := 36
 PRODUCT_SHIPPING_API_LEVEL := 36
 PRODUCT_TARGET_VNDK_VERSION := 36
 
-# 动态分区
+# Dynamic partitions
 PRODUCT_USE_DYNAMIC_PARTITIONS := true
 
-# AERA 工具
+# AERA recovery packages
+# Audio: recovery-side AGM/PAL host and AERA browser PCM bridge.  The source
+# is device-local under audio/; stock libraries/modules are loaded from the
+# installed partitions at runtime, never copied into the ramdisk.
 PRODUCT_PACKAGES += \
     aera-audio-bridge \
     aera-audio-service \
@@ -30,18 +26,12 @@ PRODUCT_PACKAGES += \
     lpmake \
     lpunpack
 
-# Adreno GPU 后端（本机 ro.hardware.egl=adreno / vulkan=adreno）
+# Adreno 840 graphics backend
 PRODUCT_VENDOR_PROPERTIES += \
-    ro.hardware.egl=adreno \
-    ro.hardware.vulkan=adreno
+    ro.hardware.egl=adreno
 
-# OTA 签名证书
-PRODUCT_EXTRA_RECOVERY_KEYS += \
-    $(LOCAL_PATH)/security/local_OTA \
-    $(LOCAL_PATH)/security/special_OTA
-
-# Soong namespace
+# Soong namespaces
 PRODUCT_SOONG_NAMESPACES += $(LOCAL_PATH)
 
-# AERA 设备参数
+# AERA settings
 $(call inherit-product, $(LOCAL_PATH)/aera_tb323fu.mk)

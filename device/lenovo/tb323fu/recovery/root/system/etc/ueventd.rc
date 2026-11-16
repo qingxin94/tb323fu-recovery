@@ -1,8 +1,7 @@
 import /vendor/etc/ueventd.rc
 import /odm/etc/ueventd.rc
-# ELDEN code for ELDEN-550 by gaoyh14 at 20250228 start
-firmware_directories /vendor/firmware_mnt/image/ /etc/firmware/ /odm/firmware/ /vendor/firmware/ /firmware/image/
-# ELDEN code for ELDEN-550 by gaoyh14 at 20250228 end
+
+firmware_directories /etc/firmware/ /odm/firmware/ /vendor/firmware/ /firmware/image/
 uevent_socket_rcvbuf_size 16M
 
 subsystem graphics
@@ -89,9 +88,3 @@ subsystem vfio
 /sys/devices/system/cpu/cpu*   cpufreq/scaling_min_freq   0664  system system
 /sys/devices/virtual/misc/uhid/*/leds/* brightness   0664  system system
 /sys/devices/virtual/misc/uhid/*/leds/* multi_intensity   0664  system system
-
-# Add olympia keyboard LED support.
-/sys/devices/virtual/misc/uhid/*/input/*/* brightness  0666  system system
-
-/sys/devices/platform/soc/a600000.ssusb/a600000.dwc3/xhci-hcd.1.auto/usb1/1-1/1-1:1.0/*/input/*/* brightness  0666  system system
-

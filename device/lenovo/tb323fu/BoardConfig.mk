@@ -1,16 +1,16 @@
 #
-# AERA Recovery device tree - Lenovo Legion Y700 (TB323FU)
-# Platform: SM8850 / canoe / Android 16 / kernel 6.12.30-4k
-# All partition geometry is measured from the stock TB323_ZUXOS_2.0.12.088 package.
+# AERA Recovery device configuration for Lenovo Legion Tab 8.8" Gen 5
+# Model: TB323FU (Lenovo Legion Y700 Gen 5, Qualcomm Canoe / SM8850)
 #
+# SPDX-License-Identifier: Apache-2.0
+#
+
 DEVICE_PATH := device/lenovo/tb323fu
 
-# Build tolerance (minimal manifest)
+# Keep the build tolerant while porting; remove once the tree is fully clean.
 ALLOW_MISSING_DEPENDENCIES := true
 BUILD_BROKEN_DUP_RULES := true
 BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true
-BUILD_BROKEN_NINJA_USES_ENV_VARS += RTIC_MPGEN
-BUILD_BROKEN_PLUGIN_VALIDATION := soong-libaosprecovery_defaults soong-libguitwrp_defaults soong-libminuitwrp_defaults soong-vold_defaults
 
 # Architecture
 TARGET_ARCH := arm64
@@ -18,28 +18,27 @@ TARGET_ARCH_VARIANT := armv8-a
 TARGET_CPU_ABI := arm64-v8a
 TARGET_CPU_VARIANT := generic
 TARGET_CPU_VARIANT_RUNTIME := oryon
-TARGET_2ND_ARCH := arm
-TARGET_2ND_ARCH_VARIANT := armv8-2a
-TARGET_2ND_CPU_ABI := armeabi-v7a
-TARGET_2ND_CPU_VARIANT := generic
-TARGET_2ND_CPU_VARIANT_RUNTIME := kryo
 TARGET_USES_64_BIT_BINDER := true
-TARGET_SUPPORTS_64_BIT_APPS := true
 
-# Power
-ENABLE_CPUSETS := true
-ENABLE_SCHEDBOOST := true
-
-# Bootloader / platform
-PRODUCT_PLATFORM := canoe
-TARGET_BOOTLOADER_BOARD_NAME := canoe
-TARGET_NO_BOOTLOADER := true
-TARGET_NO_RADIOIMAGE := true
+# Platform
 TARGET_BOARD_PLATFORM := sm8850
 TARGET_BOARD_PLATFORM_GPU := qcom-adreno840
 QCOM_BOARD_PLATFORMS += sm8850
 
-# Kernel (stock boot.img Image: 6.12.30-android16-5-g1750f757fabe-ab13938768-4k)
+TARGET_BOOTLOADER_BOARD_NAME := TB323FU
+TARGET_NO_BOOTLOADER := true
+
+# Kernel
+# The firmware package ships two closely related 6.12.30 builds:
+#   boot.img        -> 6.12.30-android16-5-g1750f757fabe-ab13938768-4k
+#   vmlinux         -> 6.12.30-android16-5-maybe-dirty-4k
+# The vendor_dlkm modules carry __versions CRCs.  With CONFIG_MODVERSIONS=y,
+# same_magic() skips the release/localversion prefix and compares only
+# " SMP preempt mod_unload modversions aarch64"; symbol CRCs then enforce ABI.
+# So the stock boot kernel can load these modules; no kernel replacement is
+# required.  prebuilt/kernel is only an optional reference/boot experiment,
+# and recovery itself is kernel-less like stock.  Never patch vermagic or
+# bundle vendor .ko files.
 TARGET_KERNEL_ARCH := arm64
 TARGET_KERNEL_HEADER_ARCH := arm64
 BOARD_KERNEL_IMAGE_NAME := Image
@@ -49,31 +48,46 @@ TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/kernel
 BOARD_MKBOOTIMG_ARGS += --header_version $(BOARD_BOOT_HEADER_VERSION)
 BOARD_MKBOOTIMG_ARGS += --pagesize $(BOARD_KERNEL_PAGESIZE)
 BOARD_RAMDISK_USE_LZ4 := true
+
+# Recovery image geometry (GPT, LUN4)
+BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600
+# Stock boot.img is 96 MiB and holds the kernel (ramdisk_size = 0).
+# Recovery mode loads that kernel; recovery.img itself has kernel_size = 0.
+BOARD_BOOTIMAGE_PARTITION_SIZE := 100663296
+BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE := 8388608
+BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 100663296
+BOARD_DTBOIMG_PARTITION_SIZE := 75497472
+
+# Recovery is a ramdisk-only image, exactly like stock: kernel_size = 0.
+# The bootloader boots it with the kernel from the boot partition (g1750).
+# That kernel accepts the maybe-dirty vendor modules through __versions CRC
+# matching, so recovery must not try to carry or replace the boot kernel.
 BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true
-TARGET_KERNEL_VERSION := 6.12
-AERA_ROOT_MODULE_KERNELS := 6.12
 
 # A/B
 AB_OTA_UPDATER := true
 AB_OTA_PARTITIONS := \
     boot \
     init_boot \
-    recovery \
     vendor_boot \
     dtbo \
+    recovery \
+    odm \
+    product \
+    system \
+    system_ext \
+    system_dlkm \
     vbmeta \
     vbmeta_system \
-    vbmeta_vendor
+    vendor \
+    vendor_dlkm \
+    dataext
 
-# Partition sizes (measured from GPT / package super chunks)
-BOARD_BOOTIMAGE_PARTITION_SIZE := 100663296
-BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 100663296
-BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600
-BOARD_DTBOIMG_PARTITION_SIZE := 75497472
-BOARD_INIT_BOOTIMAGE_PARTITION_SIZE := 8388608
-BOARD_FLASH_BLOCK_SIZE := 131072
+# Verified boot
+BOARD_AVB_ENABLE := true
+BOARD_AVB_VBMETA_SYSTEM := system system_ext product system_dlkm
 
-# Dynamic partitions: super = 20 GiB (LP block device size 0x500000000)
+# Dynamic partitions (super = 20,480 MiB, LP group qti_dynamic_partitions)
 BOARD_SUPER_PARTITION_SIZE := 21474836480
 BOARD_SUPER_PARTITION_GROUPS := qti_dynamic_partitions
 BOARD_QTI_DYNAMIC_PARTITIONS_SIZE := 21470642176
@@ -85,19 +99,18 @@ BOARD_QTI_DYNAMIC_PARTITIONS_PARTITION_LIST := \
     vendor_dlkm \
     odm \
     system_dlkm
+
 BOARD_PARTITION_LIST := $(call to-upper, $(BOARD_QTI_DYNAMIC_PARTITIONS_PARTITION_LIST))
-# All logical partitions in this retail package are ext4 (verified 0xef53 superblock)
 $(foreach p, $(BOARD_PARTITION_LIST), $(eval BOARD_$(p)IMAGE_FILE_SYSTEM_TYPE := ext4))
 $(foreach p, $(BOARD_PARTITION_LIST), $(eval TARGET_COPY_OUT_$(p) := $(call to-lower, $(p))))
-BOARD_BUILD_VENDOR_DLKM_IMAGE := true
-BOARD_BUILD_SYSTEM_DLKM_IMAGE := true
+BOARD_VENDOR_DLKMIMAGE_FILE_SYSTEM_TYPE := ext4
 
-# Filesystems
+# File systems
 BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
 TARGET_USERIMAGES_USE_EXT4 := true
 TARGET_USERIMAGES_USE_F2FS := true
 
-# Crypto
+# Crypto / FBE
 BOARD_USES_METADATA_PARTITION := true
 BOARD_USES_QCOM_FBE_DECRYPTION := true
 AERA_INCLUDE_CRYPTO := true
@@ -109,14 +122,9 @@ AERA_USE_FSCRYPT_POLICY := 2
 TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
 AERA_INCLUDE_FASTBOOTD := true
+AERA_USE_DMCTL := 1
 AERA_SKIP_ADDITIONAL_FSTAB := true
-AERA_UI_ADAPTIVE_RESOLUTION := false
-
-# 默认中文 + 开启 AERA 内置的 32 种语言（en/ar/bg/bn/ca/cs/de/el/es/fa/fr/he/hi/
-# hu/id/it/ja/ko/nl/no/pl/pt_BR/pt_PT/ro/ru/sr/sv/th/tr/uk/vi/zh_CN/zh_TW）。
-# 宏值必须带引号：Android.mk 直接拼 -DAERA_DEFAULT_LANGUAGE=$(...)，Soong 会 trim 引号。
-AERA_DEFAULT_LANGUAGE := "zh_CN"
-AERA_EXTRA_LANGUAGES := true
+AERA_UI_ADAPTIVE_RESOLUTION := true
 
 # Tools
 AERA_INCLUDE_LIBRESETPROP := true
@@ -124,6 +132,9 @@ AERA_INCLUDE_LPDUMP := true
 AERA_INCLUDE_LPTOOLS := true
 AERA_INCLUDE_REPACKTOOLS := true
 AERA_INCLUDE_RESETPROP := true
+
+# Root Manager supports the device's 6.12 GKI kernel
+AERA_ROOT_MODULE_KERNELS := 6.12
 
 # Debug
 TARGET_USES_LOGD := true
@@ -133,18 +144,16 @@ TARGET_RECOVERY_DEVICE_MODULES += strace
 RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/debuggerd
 RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/strace
 
-# Display: 8.8" 3040x1904 165Hz, panel0-backlight
+# Display: 8.8" 3040x1904, NT36523 + CSOT, 165 Hz capable
 AERA_BRIGHTNESS_PATH := "/sys/class/backlight/panel0-backlight/brightness"
-AERA_DEFAULT_BRIGHTNESS := 2047
-AERA_MAX_BRIGHTNESS := 4094
-AERA_SCREEN_H := 2280
-AERA_FRAMERATE := 165
+AERA_DEFAULT_BRIGHTNESS := 2000
+AERA_MAX_BRIGHTNESS := 4095
+AERA_FRAMERATE := 60
 AERA_NO_SCREEN_BLANK := true
 AERA_SCREEN_BLANK_ON_BOOT := true
 AERA_THEME := portrait_hdpi
-TARGET_USES_VULKAN := true
 
-# Filesystem / storage
+# Filesystem features
 RECOVERY_SDCARD_ON_DATA := true
 TARGET_USES_MKE2FS := true
 AERA_ENABLE_FS_COMPRESSION := true
@@ -153,92 +162,172 @@ AERA_INCLUDE_FUSE_NTFS := true
 AERA_INCLUDE_NTFS_3G := true
 AERA_NO_EXFAT_FUSE := true
 
-# Version: never leak the retail patch level into the TEE HAL info
+# Version
 PLATFORM_VERSION := 99.87.36
 PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 PLATFORM_SECURITY_PATCH := 2099-12-31
 VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
 BOOT_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
-AERA_DEVICE_VERSION := Lenovo_Legion_Y700
+AERA_DEVICE_VERSION := Lenovo_Legion_Tab_Gen5_TB323FU
 
-# Input haptics
+# Haptics
 AERA_SUPPORT_INPUT_AIDL_HAPTICS := true
 
-# Misc
+# Other AERA settings
 TARGET_RECOVERY_QCOM_RTC_FIX := true
 AERA_EXCLUDE_APEX := true
 AERA_EXCLUDE_DEFAULT_USB_INIT := true
-AERA_DEFAULT_LANGUAGE := "zh_CN"
+AERA_DEFAULT_LANGUAGE := zh_CN
 AERA_EXTRA_LANGUAGES := true
+
+# ---------------------------------------------------------------------------
+# Vendor modules: names only. AERA mounts the real /vendor and /vendor_dlkm
+# partitions and loads the .ko files that are already on the device. Nothing
+# here is copied into the recovery ramdisk.
+#
+# Startup chain (SPU/weaver -> touch/display/USB/haptics/battery/crypto):
+# ---------------------------------------------------------------------------
+AERA_LOAD_VENDOR_MODULES := "\
+    qcom_smd.ko \
+    qcom_glink.ko \
+    qcom_glink_smem.ko \
+    rproc_qcom_common.ko \
+    qcom_aoss.ko \
+    qcom-scm.ko \
+    mem_buf_dev.ko \
+    mdt_loader.ko \
+    qcom_pil_info.ko \
+    qcom_ramdump.ko \
+    socinfo.ko \
+    pinctrl-msm.ko \
+    qti-regmap-debugfs.ko \
+    qcom_ipc_logging.ko \
+    qcom_q6v5.ko \
+    qcom_q6v5_pas.ko \
+    qmi_helpers.ko \
+    qcom_sysmon.ko \
+    frpc-adsprpc.ko \
+    qcom_glink_spss.ko \
+    qcom_spss.ko \
+    spss_utils.ko \
+    spcom.ko \
+    panel_event_notifier.ko \
+    nvt_36xxx.ko \
+    drm_display_helper.ko \
+    msm_drm.ko \
+    msm_kgsl.ko \
+    dwc3-msm.ko \
+    phy-msm-ssusb-qmp.ko \
+    phy-qcom-qmp-combo.ko \
+    phy-msm-m31-eusb2.ko \
+    phy-qcom-eusb2-repeater.ko \
+    phy-qcom-m31-eusb2.ko \
+    phy-generic.ko \
+    repeater.ko \
+    redriver.ko \
+    nb7vpq904m.ko \
+    qcom-hv-haptics.ko \
+    haptic.ko \
+    qbt_handler.ko \
+    qti_battery_charger.ko \
+    qti_battery_debug.ko \
+    qce50_dlkm.ko \
+    qcrypto-msm_dlkm.ko \
+    qrng_dlkm.ko \
+    smcinvoke_dlkm.ko \
+    tz_log_dlkm.ko \
+    tmecom-intf_dlkm.ko"
+
+# Wi-Fi stack: staged from the real system_dlkm/vendor_dlkm after userdata
+# decryption, then the radio is brought up only when the user toggles WLAN
+# (see init.recovery.wifi.rc). Keep this list in dependency order.
+AERA_POST_DECRYPT_MODULES := "\
+    rfkill.ko \
+    libarc4.ko \
+    cfg80211.ko \
+    mac80211.ko \
+    wlan_firmware_service.ko \
+    cnss_plat_ipc_qmi_svc.ko \
+    cnss_prealloc.ko \
+    smem-mailbox.ko \
+    cnss_utils.ko \
+    qcom_ramdump.ko \
+    pcie-pdc.ko \
+    pci-msm-drv.ko \
+    mhi.ko \
+    cnss2.ko \
+    cnss_nl.ko \
+    lenovo_kallsyms.ko \
+    qcom_pdr_msg.ko \
+    pdr_interface.ko \
+    qti_pmic_glink.ko \
+    ucsi_qti_glink.ko \
+    usb_f_gsi.ko \
+    rmnet_mem.ko \
+    qcom_va_minidump.ko \
+    gsim.ko \
+    ipam.ko \
+    qca_cld3_peach_v2.ko \
+    q6_pdr_dlkm.ko \
+    q6_notifier_dlkm.ko \
+    snd_event_dlkm.ko \
+    gpr_dlkm.ko \
+    spf_core_dlkm.ko \
+    adsp_loader_dlkm.ko \
+    adsp_sleepmon.ko \
+    q6_dlkm.ko \
+    spk_id_dlkm.ko \
+    audpkt_ion_dlkm.ko \
+    audio_pkt_dlkm.ko \
+    audio_prm_dlkm.ko \
+    pinctrl_lpi_dlkm.ko \
+    hqsysfs.ko \
+    aw882xx_dlkm.ko \
+    swr_dlkm.ko \
+    wcd_core_dlkm.ko \
+    swr_ctrl_dlkm.ko \
+    lpass_bt_swr_dlkm.ko \
+    lpass_cdc_dlkm.ko \
+    lpass_cdc_rx_macro_dlkm.ko \
+    lpass_cdc_tx_macro_dlkm.ko \
+    lpass_cdc_va_macro_dlkm.ko \
+    lpass_cdc_wsa2_macro_dlkm.ko \
+    lpass_cdc_wsa_macro_dlkm.ko \
+    wcd9xxx_dlkm.ko \
+    fsa4480_i2c.ko \
+    fsa4480_sub_i2c.ko \
+    sdca_registers_dlkm.ko \
+    mbhc_dlkm.ko \
+    wcd9378_dlkm.ko \
+    wcd9378_slave_dlkm.ko \
+    wcd939x_slave_dlkm.ko \
+    wcd939x_dlkm.ko \
+    wcd938x_dlkm.ko \
+    wcd938x_slave_dlkm.ko \
+    wsa883x_dlkm.ko \
+    wsa884x_dlkm.ko \
+    wsa885x_i2c_dlkm.ko \
+    simple_amp_dlkm.ko \
+    swr_dmic_dlkm.ko \
+    swr_haptics_dlkm.ko \
+    machine_dlkm.ko \
+    btpower.ko \
+    btfmcodec.ko \
+    bt_fm_swr.ko \
+    slimbus.ko \
+    btfm_slim_codec.ko \
+    snd-usb-audio-qmi.ko"
+
+# The audio block above is names only.  AERA stages them from the real
+# /vendor_dlkm after userdata decryption; aera-audio-bootstrap then starts the
+# stock AGM/PAL user-space services.  Do not copy any .ko into recovery/root.
+
+AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 AERA_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
 AERA_USE_TOOLBOX := true
-AERA_ENABLE_WLAN := true
-AERA_ENABLE_MOBILE_DATA := 0
-AERA_ENABLE_ROOT_MANAGER := 0
-AERA_ENABLE_EFISP := 1
-AERA_INCLUDE_OMAPI := true
-AERA_ENABLE_FRP_WIPE := 1
-AERA_ENABLE_ABL_PRESERVATION := 1
-AERA_AB_DEVICE_WITH_RECOVERY_PARTITION := 1
-AERA_WORKAROUND_BACKUP_BUG := 1
-AERA_USE_AIDL_BOOT_CONTROL := 1
-AERA_FORCE_DATA_FORMAT_F2FS := 1
-AERA_USE_LZ4_COMPRESSION := 1
-AERA_DYNAMIC_FULL_SIZE := 21474836480
-AERA_NO_RELOAD_AFTER_DECRYPTION := 1
-AERA_FORCE_PREBUILT_KERNEL := 1
-AERA_NO_TREBLE_COMPATIBILITY_CHECK := 1
-# No fingerprint hardware on this tablet
-AERA_SUPPORT_FINGERPRINT := 0
+AERA_INPUT_BLACKLIST := "hbtp_vm"
 
-# ---- Module loading (dependency order from stock modules.dep) ----
-# Stage 1 (before decryption): display / touch / haptics / charger
-# spcom / spss_utils / stm_st54se_gpio / nxp-nci / adsp_loader_dlkm / haptic and
-# their full dependency closure (qcom_spss, qcom_sysmon, qcom_glink_spss,
-# smcinvoke_dlkm, snd_event_dlkm, spf_core_dlkm, q6_pdr_dlkm, q6_notifier_dlkm,
-# gpr_dlkm) are staged into recovery/root/vendor/lib/modules together with the
-# stock modules.dep, so libmodprobe can resolve the chain by name.
-AERA_LOAD_VENDOR_MODULES := "panel_event_notifier.ko spi-msm-geni.ko i3c-master-msm-geni.ko nvt_36xxx.ko msm_kgsl.ko qmi_helpers.ko qcom_glink.ko qcom_glink_smem.ko qcom_smd.ko qcom_pdr_msg.ko pdr_interface.ko rproc_qcom_common.ko qti_pmic_glink.ko qcom-hv-haptics.ko swr_dlkm.ko swr_haptics_dlkm.ko aw882xx_dlkm.ko leds-qpnp-vibrator-ldo.ko haptic.ko adsp_loader_dlkm.ko spcom.ko spss_utils.ko stm_st54se_gpio.ko nxp-nci.ko"
-AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
-
-# Load them from the ramdisk before /vendor and /vendor_dlkm are mounted.
-# SPU's IAR-ready event is only ever delivered to the notifier spss_utils
-# registers while it probes, and weaver's read waits 30 s for that event.  A
-# probe that happens after the event was already raised waits out the 30 s and
-# fails every time - which is what keystore2's watchdog then reports as
-# getHardwareInfo() never returning.  Loading from ramdisk in
-# PartitionManager's fstab pass puts the probe ahead of the SPU power-up.
-TW_LOAD_PREBUILT_MODULES_AT_FIRST := true
-
-
-# Stage 2 (after FBE decryption): WiFi/BT (wcn7750)
-AERA_POST_DECRYPT_MODULES := "rfkill.ko smem-mailbox.ko wlan_firmware_service.ko cnss_prealloc.ko qcom_ramdump.ko qcom_smd.ko qcom_glink.ko qcom_glink_smem.ko rproc_qcom_common.ko pdr_interface.ko mhi.ko pci-msm-drv.ko pcie-pdc.ko cnss_plat_ipc_qmi_svc.ko cnss_utils.ko cnss_nl.ko cnss2.ko icnss2.ko repeater.ko redriver.ko rmnet_mem.ko gsim.ko ipam.ko cfg80211.ko qca_cld3_wcn7750.ko btfmcodec.ko btpower.ko bt_fm_swr.ko lpass_bt_swr_dlkm.ko machine_dlkm.ko"
-
-# Stage the installed ROM runtime (vendor/odm/system) in RAM and use it,
-# instead of shipping a hand-picked copy of the vendor blobs in ramdisk.
-AERA_COPY_RUNTIME_TO_RAM := 1
-# The shipped canoe reference (oneplus_infiniti R1.0) and both community
-# recoveries that boot on TB323FU (TWRP-16.0, OrangeFox R12.0) use a fully
-# expanded ramdisk: no aera-runtime.tar.xz, no early-init unpack step.
-AERA_USE_EXTREME_COMPRESSION := 0
-AERA_DEFAULT_KEYMASTER_VERSION := 4.x   # 设备为 AIDL KeyMint V4；不设会触发 aera_build.mk:648 的 $(error)
-AERA_FORCE_KEYMASTER_VER := true
-AERA_INPUT_BLACKLIST := "hbtp_vm"   # 触摸控制器驱动名，避免误判为输入设备
-AERA_USE_UPDATED_MAGISKBOOT := 0   # 默认 prebuilt magiskboot 4K 对齐；_updated 为 16K 对齐，本机 4K 页内核不可用
-TW_INCLUDE_CRYPTO_FBE := true
-TW_INCLUDE_FBE_METADATA_DECRYPT := true
-TW_INCLUDE_CRYPTO := true
-
-AERA_VIRTUAL_AB_DEVICE := 1      # aera_build.mk 判等 "1"；原厂 ro.virtual_ab.enabled=true
-AERA_USE_DMCTL := 1              # 映射到 OF_USE_DMCTL，判等 1；dynamic partitions / super
-# The panel's preferred mode is 120 Hz and the 165 Hz mode is a DMS (Dynamic
-# Mode Switch) target.  Asking for 165 on the first frame makes
-# dsi_display_prepare fail with rc=-22 ("DMS not supported on first frame"), so
-# the first atomic commit never gets a completed fence, the UI blocks on it and
-# the screen stays at the panel's blank white.  Stay on the preferred mode.
-AERA_DRM_FIXED_REFRESH_RATE := 120
-AERA_SUPPORT_INPUT_AIDL_HAPTICS_FQNAME := "vendor.lenovo.hardware.vibrator_dual"
-
-# Verified Boot
-BOARD_AVB_ENABLE := true
-BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
+# eSE / OMAPI (device has ST54L). Keep OMAPI off in the first build because
+# the vendor image does not expose the secure-element HAL/lib closure; turn it
+# on after adding those blobs.
+AERA_INCLUDE_OMAPI := false

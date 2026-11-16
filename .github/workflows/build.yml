@@ -21,10 +21,8 @@ jobs:
     - name: Checkout device tree
       uses: actions/checkout@v4
 
-    # 原第 2 步「Download prebuilt binaries from Release」已删除：
-    # 本设备树自带 prebuilt/kernel（39MB，md5 e3e00158eb5b842270c37322780709ba，与原厂 boot.img 内核一致）
-    # 与 22 个内核模块（recovery/root/lib/modules/），不再拉别人那份 23.6MB 包，
-    # 也避免它覆盖我们的模块清单（它那份 309 个 ko 缺 qca_cld3_wcn7750）。
+    # 设备树已换成本地复核查验版本（prebuilt/kernel 39.9MB，md5 2c6bc3464ff61f35e2d5a83f1a6302ff；
+    # recovery/root 不再预置 vendor .ko，运行时从真机 vendor_dlkm / system_dlkm / vendor_boot 加载）。
 
     - name: Free disk space
       run: |
@@ -75,7 +73,7 @@ jobs:
     - name: Install repo
       run: |
         mkdir -p ~/bin
-        curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
+        curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
         chmod +x ~/bin/repo
         echo "$HOME/bin" >> $GITHUB_PATH
 
@@ -93,16 +91,24 @@ jobs:
         repo init -u https://github.com/AERA-Recovery/android_manifest.git -b aera-16.0 --depth=1
         mkdir -p .repo/local_manifests
         # 用 AERA 官方 remove-minimal.xml（删 601 项）。
-        # 仓库自带 remove-minimal2.xml 会把 system/netd 一起删掉，
-        # dnsresolver_aidl_interface 缺 netd_event_listener_interface，ninja 在 29% 炸，不能用。
-        curl -sL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
+        curl -fsSL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
           -o .repo/local_manifests/remove-minimal.xml
+        xmllint --noout .repo/local_manifests/remove-minimal.xml
         set -o pipefail
         for i in $(seq 1 2000); do
           echo "=== sync attempt $i ==="
-          if repo sync -c --force-sync --no-clone-bundle --no-tags -j8 > /tmp/sync.log 2>&1; then
+          set +e
+          timeout 45m repo sync -c --force-sync --no-clone-bundle --no-tags -j8 > /tmp/sync.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
             echo "=== sync OK ==="
             break
+          fi
+          if [ "$rc" -eq 124 ]; then
+            echo "=== sync timeout after 45m, retry ==="
+            sleep 10
+            continue
           fi
           bad=$(grep -oP 'remove-project (path|name)="[^"]*"' /tmp/sync.log | head -1 | sed 's/remove-project [a-z]*="//;s/"//')
           if [ -z "$bad" ]; then
@@ -112,6 +118,7 @@ jobs:
           fi
           echo "=== removing non-existent: $bad ==="
           sed -i "\|\"$bad\"|d" .repo/local_manifests/remove-minimal.xml
+          sleep 5
         done
         find /mnt/work -name .git -type d -prune -exec rm -rf {} + 2>/dev/null || true
         df -h /
@@ -119,13 +126,17 @@ jobs:
     - name: Copy device tree
       run: |
         mkdir -p /mnt/work/device/lenovo/tb323fu
-        cp -r device/lenovo/tb323fu/* /mnt/work/device/lenovo/tb323fu/
+        cp -a device/lenovo/tb323fu/. /mnt/work/device/lenovo/tb323fu/
+        test -f /mnt/work/device/lenovo/tb323fu/AndroidProducts.mk
+        test -f /mnt/work/device/lenovo/tb323fu/prebuilt/kernel
         echo "设备树文件数: $(find /mnt/work/device/lenovo/tb323fu -type f | wc -l)"
+        echo "recovery/root 下 .ko 数: $(find /mnt/work/device/lenovo/tb323fu/recovery/root -name '*.ko' | wc -l)"
         ls -la /mnt/work/device/lenovo/tb323fu | head
 
     - name: Fix AERA recovery source for TB323FU
       run: |
-        python3 /mnt/work/device/lenovo/tb323fu/scripts/fix_aera_recovery_source.py /mnt/work
+        test -z "$(find /mnt/work/device/lenovo/tb323fu/recovery/root -name '*.ko' -print -quit)" || { echo "recovery/root 仍含 .ko，拒绝构建"; exit 1; }
+        python3 "$GITHUB_WORKSPACE/ci/fix_aera_recovery_source.py" /mnt/work
         grep -q "android::keystore::copySqliteDb();" /mnt/work/bootable/recovery/twrp.cpp && { echo "copySqliteDb 调用仍存在"; exit 1; } || true
         grep -q "twrp.module.handler_done" /mnt/work/bootable/recovery/kernel_module_loader.cpp || { echo "handler wait 未打入"; exit 1; }
 
@@ -163,6 +174,23 @@ jobs:
         echo "=== build end rc=$rc ==="; df -h /; free -h
         exit $rc
 
+    - name: Verify kernel-less recovery image
+      run: |
+        IMG=/mnt/work/out/target/product/tb323fu/recovery.img
+        test -s "$IMG"
+        python3 - "$IMG" <<'PY'
+        import struct, sys
+        path = sys.argv[1]
+        with open(path, "rb") as f:
+            header = f.read(4096)
+        if header[:8] != b"ANDROID!":
+            raise SystemExit("not an Android boot image: %s" % path)
+        kernel_size = struct.unpack_from("<I", header, 8)[0]
+        print("recovery.img kernel_size =", kernel_size)
+        if kernel_size != 0:
+            raise SystemExit("kernel_size is not 0; recovery is not kernel-less")
+        PY
+
     - name: Upload recovery image
       uses: actions/upload-artifact@v4
       with:
@@ -178,6 +206,7 @@ jobs:
         name: resource-monitor
         path: /tmp/resmon.log
         retention-days: 3
+        if-no-files-found: ignore
 
     - name: Upload build log on failure
       if: failure()

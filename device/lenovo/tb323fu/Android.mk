@@ -1,6 +1,4 @@
 #
-# Copyright (C) 2026 The AERA Recovery Project
-#
 # SPDX-License-Identifier: Apache-2.0
 #
 

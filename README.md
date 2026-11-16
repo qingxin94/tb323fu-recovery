@@ -12,7 +12,7 @@ GitHub Actions 自动编译 AERA Recovery 设备树仓库。
 | Android | 16 |
 | 内核 | 6.12.30-android16-5 |
 | 面板 | Novatek NT36523 触控 + CSOT 3K DSC 屏（横版） |
-| Build 指纹 | `Lenovo/TB323FU/TB323FU:16/BQ2A.250831.001-BP2A.250605.031.A3/10.026.260205C:user/release-keys` |
+| Build 指纹 | `Lenovo/TB323FU/TB323FU:16/BQ2A.250831.001-BP2A.250605.031.A3/ZUXOS_2.0.12.088_260610_PRC:user/release-keys` |
 
 ## 使用方法
 
@@ -35,11 +35,11 @@ fastboot reboot recovery
 
 | 项目 | 状态 | 说明 |
 |---|---|---|
-| 编译内存 | ✅ 已配置 | Actions runner 15.6GB 内存，已加 16GB swap + 降并行度 -j2 |
+| 编译内存 | ✅ 已配置 | Actions runner 15.6GB 内存，已加 16GB swap + 构建并行度 -j4 |
 | 电池电量显示 | ✅ 已配置 | 按 SM8850 标准 Qualcomm power_supply 路径配置 |
-| 屏幕分辨率 | ⚠️ 待实测 | 横版平板，面板时序候选含 2160x5120 / 5120x2160，实际物理分辨率待刷机确认 |
-| 触摸屏 | ⚠️ 待实测 | Novatek NT36523 驱动随内核加载，需刷入后确认；无触摸可用音量键+电源键操作 |
-| 预编译 kernel | ⚠️ 待补充 | 需从原厂 boot/vendor_boot 提取 Image + dtb 并上传到 Release |
+| 屏幕分辨率 | ✅ 已确认 | 物理面板 3040x1904（横版平板） |
+| 触摸屏 | ✅ 已配置 | Novatek NT36523，运行时从真机 vendor_dlkm 加载 nvt_36xxx.ko |
+| 预编译 kernel | ✅ 已内置 | `prebuilt/kernel`，MD5 `2c6bc3464ff61f35e2d5a83f1a6302ff` |
 
 ## 无触摸时的操作方式
 

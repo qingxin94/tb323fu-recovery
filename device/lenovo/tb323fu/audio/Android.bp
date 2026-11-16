@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// TB323FU recovery audio host + browser PCM bridge.
+//
+// This is deliberately device-local: it loads the AGM/PAL runtime from the
+// installed stock vendor partition and never bundles a kernel module.  The
+// kernel modules are requested by name in BoardConfig.mk and loaded by AERA
+// from the real /vendor_dlkm.
+
+cc_binary {
+    name: "aera-audio-service",
+    recovery: true,
+    srcs: ["aera_audio_host.c"],
+    shared_libs: [
+        "libbinder_ndk",
+        "liblog",
+        "libdl",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+cc_binary {
+    name: "aera-audio-bridge",
+    recovery: true,
+    srcs: ["aera_audio_bridge.cpp"],
+    cpp_std: "c++17",
+    shared_libs: [
+        "liblog",
+        "libdl",
+    ],
+    cflags: [
+        "-D_GNU_SOURCE",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
