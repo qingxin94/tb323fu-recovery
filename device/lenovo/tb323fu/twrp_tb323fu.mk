@@ -31,3 +31,7 @@ BUILD_FINGERPRINT := Lenovo/TB323FU/TB323FU:16/BQ2A.250831.001-BP2A.250605.031.A
 
 # AERA UI
 AERA_STATUS_ICONS_ALIGN := center
+
+# magiskboot / prebuilt binaries 是 4K 页对齐；Android 16 默认按 16K 检查。
+# 旧树就是因为这项在 91% 被拦下，显式关闭，和已验证的旧构建保持一致。
+PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false
