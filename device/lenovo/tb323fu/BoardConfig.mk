@@ -85,7 +85,10 @@ AB_OTA_PARTITIONS := \
 
 # Verified boot
 BOARD_AVB_ENABLE := true
-BOARD_AVB_VBMETA_SYSTEM := system system_ext product system_dlkm
+# 不生成 chained vbmeta_system：本构建只产出 recovery.img，设备上沿用
+# stock vbmeta_system。缺少 key 时保留下面这行会让 Soong fsgen 报
+# "No key found for chained avb partition vbmeta_system"。
+# BOARD_AVB_VBMETA_SYSTEM := system system_ext product system_dlkm
 
 # Dynamic partitions (super = 20,480 MiB, LP group qti_dynamic_partitions)
 BOARD_SUPER_PARTITION_SIZE := 21474836480
