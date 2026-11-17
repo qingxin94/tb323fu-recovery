@@ -10,11 +10,31 @@
 
 import /init.recovery.wifi.rc
 import /init.recovery.audio.rc
-import /vendor/etc/init/aera-crypto.rc
+import /system/etc/init/aera-crypto.rc
 
 on early-init
     # Enable Qualcomm's Mapper5/SnapAlloc path before the allocator starts.
     setprop vendor.gralloc.enable_snapalloc true
+    # Kernel firmware lookup uses the real vendor firmware partition.  The
+    # partition is mounted later by AERA before the touch/display modules load.
+    write /sys/module/firmware_class/parameters/path /vendor/firmware
+
+
+service aera-stock-mount /system/bin/sh /system/bin/aera-stock-mount.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service aera-touch-load /system/bin/sh /system/bin/aera-touch-load.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
 
 service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
     class core
@@ -32,16 +52,63 @@ service vendor.boot-qti /vendor/bin/hw/android.hardware.boot-service.qti
     group root
     seclabel u:r:recovery:s0
 
+# Stock Qualcomm thermal engine, started only after the real vendor partition
+# is mounted so it can read /vendor/etc/thermal-engine*.conf.
+service vendor.thermal-engine /vendor/bin/thermal-engine-v2
+    class core
+    disabled
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
+# Run as a service, not as a synchronous exec in on fs/on property.  The early
+# on fs attempt could block init while /dev/block/by-name/metadata was not ready
+# and produced a black screen with no adbd.
+service aera-metadata-mount /system/bin/sh /system/bin/aera-mount-metadata.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service aera-low-brightness /system/bin/sh /system/bin/aera-low-brightness.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+# Mount the real stock partitions first.  This script only mounts/binds;
+# it never copies a vendor binary, library, config or firmware into recovery.
 on property:twrp.modules.loaded=true
-    # msm_kgsl/msm_drm are loaded by AERA before this property is set.
+    # CI patches kernel_module_loader.cpp to wait for this property after it
+    # finishes unmounting the temporary vendor mounts.
+    setprop twrp.module.handler_done true
+    start aera-stock-mount
+
+# Display, touch, crypto and thermal services are only started after the
+# real partitions are mounted and verified.  Their binaries and libraries
+# stay on /vendor, /vendor_dlkm and /odm; they are never duplicated here.
+on property:aera.stock.mounted=true
+    exec -- /system/bin/restorecon --recursive /vendor/bin /vendor/lib64 /vendor/etc /odm
+    start aera-touch-load
     start aera-graphics-allocator
     start vendor.qseecomd
+    start vendor.minkdaemon
+    start vendor.sec_nvm
     start vendor.gatekeeper_default
     start vendor.keymint
+    start vendor.spu_weaver
     start vendor.boot-qti
+    start vendor.thermal-engine
+    start aera-low-brightness
+    write /sys/class/backlight/panel0-backlight/brightness 300
 
 on init
     setprop sys.usb.configfs 1
+    start aera-metadata-mount
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}

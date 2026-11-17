@@ -18,6 +18,7 @@
 #       --boot-kernel /path/to/unpacked/boot/kernel
 #
 import argparse
+import hashlib
 import re
 import struct
 import subprocess
@@ -42,6 +43,10 @@ def fail(msg):
 
 def info(msg):
     print(f"INFO  {msg}")
+
+
+def sha256_prefix(path, size=16):
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:size]
 
 
 def board_list(name):
@@ -139,12 +144,55 @@ def main():
     else:
         ok("recovery/root 里没有预置任何 .ko")
 
+    module_metadata = []
+    for pattern in (
+        "modules.dep",
+        "modules.alias",
+        "modules.softdep",
+        "modules.load",
+        "modules.load.twrp",
+        "modules.builtin",
+    ):
+        module_metadata.extend((ROOT / "recovery/root").rglob(pattern))
+    if module_metadata:
+        fail(f"recovery/root 里有 {len(module_metadata)} 个模块索引/清单文件")
+    else:
+        ok("recovery/root 里没有 modules.* 模块索引/清单")
+
+    # Touch firmware and vendor configuration must stay on the real
+    # /vendor partition; the recovery ramdisk only has an empty mount point.
+    fw_files = list((ROOT / "recovery/root/system/etc/firmware").glob("*"))
+    fw_files += list((ROOT / "recovery/root/vendor/firmware").glob("*"))
+    if fw_files:
+        fail(f"recovery/root 里仍有固件副本: {[str(p.relative_to(ROOT)) for p in fw_files]}")
+    else:
+        ok("recovery/root 没有触摸/GPU 固件副本，固件走真实 /vendor/firmware")
+
+    # An empty lib/modules in the recovery ramdisk shadows the real
+    # vendor_boot /lib/modules, so the loader would never see the device's
+    # actual GKI modules.  Keep the path absent and let vendor_boot provide it.
+    if (ROOT / "recovery/root/lib/modules").exists():
+        fail("recovery/root/lib/modules 存在，会遮住 vendor_boot 的真实 /lib/modules")
+    else:
+        ok("recovery/root 不占位 /lib/modules，vendor_boot 的真实目录可直接暴露")
+
     startup = board_list("AERA_LOAD_VENDOR_MODULES")
-    for required in ("spss_utils.ko", "spcom.ko", "nvt_36xxx.ko"):
+    for required in ("spss_utils.ko", "spcom.ko", "panel_event_notifier.ko"):
         if required in startup:
             ok(f"启动期模块列表包含 {required}")
         else:
             fail(f"启动期模块列表缺 {required}")
+    if "nvt_36xxx.ko" in startup:
+        fail("nvt_36xxx.ko 不能在启动期加载；它必须在真实分区挂载后由 aera-touch-load.sh 加载")
+    else:
+        ok("nvt_36xxx.ko 不在启动期模块列表，挂载后单独加载")
+
+    path_tokens = [name for name in startup if "/" in name]
+    if path_tokens:
+        fail("AERA_LOAD_VENDOR_MODULES 只能写模块名，不能写路径: "
+             + ", ".join(path_tokens))
+    else:
+        ok("AERA_LOAD_VENDOR_MODULES 只写模块名，不含 ramdisk/分区路径")
 
     fstab = (ROOT / "recovery/root/system/etc/recovery.fstab").read_text(
         encoding="utf-8", errors="replace"

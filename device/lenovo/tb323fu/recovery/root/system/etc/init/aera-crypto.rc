@@ -1,0 +1,70 @@
+# AERA crypto / gatekeeper services for TB323FU.
+#
+# These binaries and their ABI-matched libraries stay on the real /vendor
+# and /odm partitions.  This file only defines services; it does not copy
+# any stock binary or library into the recovery ramdisk.  Services start
+# after aera-stock-mount.sh has mounted and verified those partitions.
+
+service vendor.qseecomd /vendor/bin/qseecomd
+    setenv LD_LIBRARY_PATH /vendor/lib64:/system/lib64
+    socket notify-topology stream 660 system drmrpc
+    class core
+    disabled
+    user root
+    group root drmrpc
+    seclabel u:r:recovery:s0
+
+service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
+    class early_hal
+    disabled
+    user system
+    group system
+    seclabel u:r:recovery:s0
+
+service vendor.keymint /vendor/bin/hw/android.hardware.security.onekeymint-service-qti
+    class early_hal
+    disabled
+    user system
+    group system drmrpc
+    seclabel u:r:recovery:s0
+
+# Mink transport used by the OneKeyMint/Gatekeeper TEE channel.  Stock
+# starts this from early-boot; in recovery it must wait until the vendor
+# modules (qseecom/qce50) have been loaded.
+service vendor.minkdaemon /vendor/bin/hlosminkdaemon
+    class late_start
+    user system
+    group system
+    capabilities WAKE_ALARM BLOCK_SUSPEND
+    socket ssgtzd stream 0660 system system
+    socket hlos_mink_opener stream 0660 system system
+    disabled
+    seclabel u:r:recovery:s0
+
+# Secure NVM / SPU support.  Kept disabled until explicitly started so a
+# missing /mnt/vendor/persist does not affect the rest of recovery.
+service vendor.sec_nvm /vendor/bin/sec_nvm
+    class core
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+# SPU-backed Weaver.  Android 16 FBE metadata uses IWeaver/default; this is
+# the only Weaver implementation present in the stock TB323FU vendor image.
+service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
+    class hal
+    user system
+    group system drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+
+# StrongBox KeyMint.  It registers IKeyMintDevice/strongbox, not default;
+# leave it disabled until the SPU keymaster path is enabled explicitly.
+service vendor.keymint-spu-qti /vendor/bin/hw/android.hardware.security.keymint-service-spu-qti
+    class early_hal
+    user system
+    group system drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+#

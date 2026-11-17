@@ -215,7 +215,6 @@ AERA_LOAD_VENDOR_MODULES := "\
     spss_utils.ko \
     spcom.ko \
     panel_event_notifier.ko \
-    nvt_36xxx.ko \
     drm_display_helper.ko \
     msm_drm.ko \
     msm_kgsl.ko \

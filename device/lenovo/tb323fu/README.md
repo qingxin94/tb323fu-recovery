@@ -98,15 +98,21 @@ Wi-Fi 不在启动期加载。`AERA_POST_DECRYPT_MODULES` 在 userdata 解密后
 `system_dlkm` / `vendor_dlkm` 暂存，等用户打开 WLAN 时才真正拉起射频
 （`init.recovery.wifi.rc`）。
 
-> AERA 的 loader 会把模块目录临时复制到 `/tmp` 再 bind mount，目的是生成
-> 自己的 `modules.load.twrp` 而不往只读分区写文件；模块来源仍是设备分区，
-> 不是 recovery 自带，卸载后临时副本即消失。
+> `recovery/root` 里不保留 `lib/modules` 占位目录，也不放任何 `.ko` 或
+> `modules.*` 索引；否则空目录会遮住 vendor_boot 的真实 `/lib/modules`。
+> AERA 的 loader 在运行期只会把真实分区里的模块目录临时复制到 `/tmp` 再
+> bind mount，目的是生成 `modules.load.twrp` 而不往只读分区写文件；模块
+> 来源仍是设备的 `vendor_boot` / `vendor_dlkm`，不是 `recovery.img` 自带，
+> 卸载后临时副本即消失。镜像内始终零 `.ko`。
 
 ### 1.3 本机事实
 
 - 屏幕 8.8" 3040×1904，165 Hz；面板 `baldur_nt36523_csot_3k_dsc_vid`
   （NT36523 + CSOT，DSC video mode）
 - 触摸 Novatek NVT-ts-spi，`novatek-mp-criteria-609F`，模块 `nvt_36xxx.ko`
+- 触摸固件不再放进 recovery ramdisk：运行时从真实 `/vendor/firmware`
+  读取 `novatek_ts_fw.bin` / `novatek_ts_mp.bin`；`recovery/root` 只保留
+  `/lib/firmware` 空挂载点，挂载脚本会 bind 真实 `/vendor/firmware`。
 - 亮度 `/sys/class/backlight/panel0-backlight/brightness`，面板
   `qcom,mdss-dsi-bl-max-level = <0xfff>` → `AERA_MAX_BRIGHTNESS := 4095`
 - A/B + 独立 `recovery_a/recovery_b`（各 100 MiB，LUN4）
@@ -258,10 +264,10 @@ python3 tools/verify_tree.py \
     --boot-kernel /path/to/unpacked/boot/kernel
 ```
 
-期望结果：kernel-less recovery、recovery/root 无 `.ko`、启动列表含
-`spss_utils.ko`/`spcom.ko`/`nvt_36xxx.ko`、49 个启动模块在
-vendor_dlkm / vendor_boot 存在、`nvt_36xxx.ko` 带 `__versions`、模块与 boot
-内核 vermagic 尾部一致。
+期望结果：kernel-less recovery、recovery/root 无 `.ko`、无 `modules.*`、
+无 `lib/modules` 占位；启动列表含 `spss_utils.ko`/`spcom.ko`，`nvt_36xxx.ko`
+在真实分区挂载后由 `aera-touch-load.sh` 加载；显示、触摸、解密服务都由
+`aera-stock-mount.sh` 验证真实 `/vendor`、`/vendor_dlkm`、`/odm` 后才启动。
 
 重新提取用户态 blob（可选，刷机包路径按实际改）：
 
