@@ -7,7 +7,7 @@ PATH=/system/bin:/vendor/bin
 export PATH
 
 LOG=/tmp/aera-stock-mount.log
-mkdir -p /vendor /vendor_dlkm /odm /system_dlkm /mnt/aera-stock
+mkdir -p /vendor /vendor_dlkm /odm /system_dlkm /lib/firmware /mnt/aera-stock
 : > "$LOG"
 
 log() { echo "$*" >> "$LOG"; }
