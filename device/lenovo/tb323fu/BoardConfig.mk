@@ -240,89 +240,28 @@ AERA_LOAD_VENDOR_MODULES := "\
     tz_log_dlkm.ko \
     tmecom-intf_dlkm.ko"
 
-# Wi-Fi stack: staged from the real system_dlkm/vendor_dlkm after userdata
-# decryption, then the radio is brought up only when the user toggles WLAN
-# (see init.recovery.wifi.rc). Keep this list in dependency order.
-AERA_POST_DECRYPT_MODULES := "\
-    rfkill.ko \
-    libarc4.ko \
-    cfg80211.ko \
-    mac80211.ko \
-    wlan_firmware_service.ko \
-    cnss_plat_ipc_qmi_svc.ko \
-    cnss_prealloc.ko \
-    smem-mailbox.ko \
-    cnss_utils.ko \
-    qcom_ramdump.ko \
-    pcie-pdc.ko \
-    pci-msm-drv.ko \
-    mhi.ko \
-    cnss2.ko \
-    cnss_nl.ko \
-    lenovo_kallsyms.ko \
-    qcom_pdr_msg.ko \
-    pdr_interface.ko \
-    qti_pmic_glink.ko \
-    ucsi_qti_glink.ko \
-    usb_f_gsi.ko \
-    rmnet_mem.ko \
-    qcom_va_minidump.ko \
-    gsim.ko \
-    ipam.ko \
-    qca_cld3_peach_v2.ko \
-    q6_pdr_dlkm.ko \
-    q6_notifier_dlkm.ko \
-    snd_event_dlkm.ko \
-    gpr_dlkm.ko \
-    spf_core_dlkm.ko \
-    adsp_loader_dlkm.ko \
-    adsp_sleepmon.ko \
-    q6_dlkm.ko \
-    spk_id_dlkm.ko \
-    audpkt_ion_dlkm.ko \
-    audio_pkt_dlkm.ko \
-    audio_prm_dlkm.ko \
-    pinctrl_lpi_dlkm.ko \
-    hqsysfs.ko \
-    aw882xx_dlkm.ko \
-    swr_dlkm.ko \
-    wcd_core_dlkm.ko \
-    swr_ctrl_dlkm.ko \
-    lpass_bt_swr_dlkm.ko \
-    lpass_cdc_dlkm.ko \
-    lpass_cdc_rx_macro_dlkm.ko \
-    lpass_cdc_tx_macro_dlkm.ko \
-    lpass_cdc_va_macro_dlkm.ko \
-    lpass_cdc_wsa2_macro_dlkm.ko \
-    lpass_cdc_wsa_macro_dlkm.ko \
-    wcd9xxx_dlkm.ko \
-    fsa4480_i2c.ko \
-    fsa4480_sub_i2c.ko \
-    sdca_registers_dlkm.ko \
-    mbhc_dlkm.ko \
-    wcd9378_dlkm.ko \
-    wcd9378_slave_dlkm.ko \
-    wcd939x_slave_dlkm.ko \
-    wcd939x_dlkm.ko \
-    wcd938x_dlkm.ko \
-    wcd938x_slave_dlkm.ko \
-    wsa883x_dlkm.ko \
-    wsa884x_dlkm.ko \
-    wsa885x_i2c_dlkm.ko \
-    simple_amp_dlkm.ko \
-    swr_dmic_dlkm.ko \
-    swr_haptics_dlkm.ko \
-    machine_dlkm.ko \
-    btpower.ko \
-    btfmcodec.ko \
-    bt_fm_swr.ko \
-    slimbus.ko \
-    btfm_slim_codec.ko \
-    snd-usb-audio-qmi.ko"
+# AERA's aera_build.mk still installs a ramdisk copy of wpa_supplicant and
+# wpa_cli when OF_ENABLE_WLAN=1.  The init service now executes the real
+# /vendor/bin/hw/wpa_supplicant, and wlan.cpp resolves wpa_cli from
+# /vendor/bin, so remove those ramdisk copies before recovery.img is packed.
+# This is a cleanup of generated output, never a write to the real partitions.
+BOARD_RECOVERY_IMAGE_PREPARE += if [ -n "$(TARGET_RECOVERY_ROOT_OUT)" ] && [ -d "$(TARGET_RECOVERY_ROOT_OUT)/system/bin" ]; then rm -f "$(TARGET_RECOVERY_ROOT_OUT)/system/bin/wpa_supplicant" "$(TARGET_RECOVERY_ROOT_OUT)/system/bin/wpa_cli" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/libkeystore-engine-wifi-hidl.so" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/android.hardware.wifi.common-V2-ndk.so" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/android.hardware.wifi.supplicant-V4-ndk.so"; fi
 
-# The audio block above is names only.  AERA stages them from the real
-# /vendor_dlkm after userdata decryption; aera-audio-bootstrap then starts the
-# stock AGM/PAL user-space services.  Do not copy any .ko into recovery/root.
+# Wi-Fi/audio/haptics modules: loaded in place from the real system_dlkm and
+# vendor_dlkm immediately after those partitions are mounted.  They do not wait
+# for userdata decryption.  The list is in
+# recovery/root/system/etc/aera-real-modules.list and is consumed by
+# aera-real-modules.sh; nothing is staged under /tmp.
+# The Wi-Fi/audio/haptics module list used to live here and AERA staged it
+# into /tmp, loading it only after /data decryption.  That made every one of
+# those functions depend on a successful PIN decrypt.  The list is now in
+# recovery/root/system/etc/aera-real-modules.list and aera-real-modules.sh
+# insmods each module directly from the real /vendor_dlkm or /system_dlkm.
+AERA_POST_DECRYPT_MODULES := ""
+
+# aera-real-modules.sh insmods each name directly from the real /vendor_dlkm or
+# /system_dlkm.  aera-audio-bootstrap then starts the stock AGM/PAL user-space
+# services.  Do not copy any .ko into recovery/root.
 
 AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 AERA_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true

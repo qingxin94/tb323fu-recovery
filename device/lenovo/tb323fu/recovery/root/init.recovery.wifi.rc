@@ -1,11 +1,14 @@
 # AERA Wi-Fi bring-up for Lenovo TB323FU (QCA "peach" / WCN7750)
 #
-# The module chain is staged from the real system_dlkm/vendor_dlkm
-# partitions after userdata decryption. The radio itself is only brought
-# up when the user toggles WLAN (sys.aera.wlan.up=1), not at boot.
+# The module chain is loaded in place from the real system_dlkm/vendor_dlkm by
+# aera-real-modules.sh.  No module is staged under /tmp and nothing depends on
+# a successful /data decryption.  The radio is only brought up when the user
+# toggles WLAN (sys.aera.wlan.up=1), not at boot.
 
-on property:post.decrypt.modules=true
+on property:aera.modules.loaded=true
     setprop sys.aera.wlan.up 0
+    start cnss-daemon
+    wait /sys/bus/platform/drivers/cnss2/b0000000.qcom,cnss-peach/fs_ready 5
     chmod 222 /sys/bus/platform/drivers/cnss2/b0000000.qcom,cnss-peach/fs_ready
     write /sys/bus/platform/drivers/cnss2/b0000000.qcom,cnss-peach/fs_ready 1
     start aera-wlan-ready
@@ -21,14 +24,23 @@ on property:sys.aera.wlan.up=1 && property:wifi.driver.ready=true
     mkdir /tmp/recovery/sockets 0777 root root
     start wpa_supplicant
 
-service wpa_supplicant /system/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
+# The supplicant binary stays on the real vendor partition.  Its control
+# socket is in /tmp so it is usable before /data is decryptable.
+service wpa_supplicant /vendor/bin/hw/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
+    user root
+    group root wifi inet
     disabled
     seclabel u:r:recovery:s0
 
-service aera-wlan-ready /system/bin/sh -c "until test -e /sys/class/net/wlan0; do sleep 1; done; setprop wifi.driver.ready true"
+service cnss-daemon /vendor/bin/cnss-daemon -n -l
+    user root
+    group root wifi inet
+    disabled
+    seclabel u:r:recovery:s0
+
+service aera-wlan-ready /system/bin/sh /system/bin/aera-wlan-ready.sh
     disabled
     oneshot
     user root
     group root
     seclabel u:r:recovery:s0
-#

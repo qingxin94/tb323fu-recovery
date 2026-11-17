@@ -5,8 +5,8 @@
 # TB323FU recovery audio bring-up.
 #
 # Mount the installed stock vendor / DSP / modem partitions read-only and start
-# the narrow AGM/PAL host.  Kernel modules are NOT copied here: AERA has already
-# loaded them by name from /vendor_dlkm before post.decrypt.modules becomes true.
+# the narrow AGM/PAL host.  Kernel modules are NOT copied here: AERA loads them
+# in place from /vendor_dlkm before aera.modules.loaded becomes true.
 #
 set -u
 

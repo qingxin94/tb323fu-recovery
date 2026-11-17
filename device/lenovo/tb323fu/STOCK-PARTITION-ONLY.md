@@ -12,8 +12,18 @@ is mounted from the real device partitions and used in place.
 - Removed `recovery/root/system/etc/firmware/novatek_ts_*.bin`
   - touch firmware now comes from the real `/vendor/firmware`
 - Removed stock ODM VINTF fragments and `ueventd.rc`
-  - the AERA device VINTF root is kept as `system/etc/vintf/device-manifest.xml`
-  - it is bind-mounted over the real `/odm/etc/vintf/manifest.xml` after `/odm` mounts
+  - the AERA device VINTF root is kept as `system/etc/vintf/manifest.xml`
+  - it is not bind-mounted over `/odm`: stock `/odm` has no `/etc/vintf`
+    directory and is mounted read-only, so that bind could never succeed
+- Added the fix3b SPU service chain
+  - `vendor.secretkeeper`, `vendor.spdaemon`, `vendor.gatekeeper_spu`,
+    `vendor.keymint-spu-qti` and `vendor.qti.hardware.spu.service` are
+    defined against real `/vendor/bin/*` paths and started after
+    `aera.stock.mounted`
+  - `vendor.gatekeeper.is_security_level_spu=1`
+  - `/persist` and `/mnt/vendor/spunvm` are mounted writable; `secnvm`,
+    `spudc` and `iar_db` are created on real `/persist`
+  - `crypto.ready=1` is set before `restart keystore2`
 - Removed `nvt_36xxx.ko` from the startup module list
   - touch is loaded after `/vendor` and `/vendor_dlkm` are mounted
 - Added `system/bin/aera-stock-mount.sh`
@@ -23,12 +33,33 @@ is mounted from the real device partitions and used in place.
   - binds `/persist` to `/mnt/vendor/persist`
   - verifies the required HAL/library/firmware paths before setting
     `aera.stock.mounted`
+- Added `system/bin/aera-real-modules.sh` and `system/etc/aera-real-modules.list`
+  - the 75 Wi-Fi/audio/haptics modules are `insmod`ed in place from the real
+    `/vendor_dlkm/lib/modules` and `/system_dlkm/lib/modules`
+  - no module is copied or staged into `/tmp`; `AERA_POST_DECRYPT_MODULES` is
+    empty, so nothing waits for `/data` decryption
+  - `rfkill.ko` and `libarc4.ko` are pulled from the real `system_dlkm`
+    (mounted directly if the optional stock-mount pass did not mount it)
+  - `cnss-daemon` is started before `qca_cld3_peach_v2.ko`
 - Added `system/bin/aera-touch-load.sh`
   - searches the real module dirs and loads `nvt_36xxx.ko` only after mount
 - Added service gating in `init.recovery.qcom.rc`
   - display allocator, crypto/weaver/keymint, boot HAL and thermal engine
     start only on `aera.stock.mounted=true`
   - no vendor service starts before the partitions are verified
+  - `vendor.qti.vibrator` and `vendor.lenovo.vibrator_dual` start on
+    `aera.modules.loaded=true`, after the real haptics modules are resident
+  - stock vibrator device nodes and LED sysfs attributes are chmod'ed in
+    `on boot`, exactly as the stock vendor rc does
+- Wi-Fi and audio no longer depend on userdata decryption
+  - `init.recovery.wifi.rc` starts `cnss-daemon`, writes the real
+    `fs_ready`, waits for `wlan0`, then starts the real
+    `/vendor/bin/hw/wpa_supplicant`
+  - `init.recovery.audio.rc` starts `aera-audio-bootstrap` on
+    `aera.modules.loaded=true`
+  - `wpa_supplicant`/`wpa_cli` ramdisk copies produced by aera_build.mk are
+    removed by `BOARD_RECOVERY_IMAGE_PREPARE`; the service uses the vendor
+    binary and `wlan.cpp` finds `wpa_cli` under `/vendor/bin`
 - Moved `aera-crypto.rc` from `/vendor/etc/init` to `/system/etc/init`
   - it is AERA service configuration, not a stock vendor file
 

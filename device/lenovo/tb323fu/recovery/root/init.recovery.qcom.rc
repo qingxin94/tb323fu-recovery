@@ -11,14 +11,46 @@
 import /init.recovery.wifi.rc
 import /init.recovery.audio.rc
 import /system/etc/init/aera-crypto.rc
+# AERA's recovery build installs keystore2.rc here.  Without this import,
+# `restart keystore2` has no service definition to restart.
+import /system/etc/init/keystore2.rc
 
 on early-init
     # Enable Qualcomm's Mapper5/SnapAlloc path before the allocator starts.
     setprop vendor.gralloc.enable_snapalloc true
+    # Force the legacy Keymaster 4.x helper path and the wrapped-key v2
+    # dm-default-key format before partitionmanager reads them.
+    setprop keymaster_ver 4.x
+    setprop ro.crypto.dm_default_key.options_format.version 2
     # Kernel firmware lookup uses the real vendor firmware partition.  The
     # partition is mounted later by AERA before the touch/display modules load.
     write /sys/module/firmware_class/parameters/path /vendor/firmware
 
+# The haptics driver creates these nodes from the startup modules.  Stock
+# vendor init used to chmod them in the full boot; recovery must do it here,
+# otherwise vendor.qti.vibrator runs as "system" but cannot open the nodes.
+on boot
+    chown system system /sys/class/qcom-haptics/primitive_duration
+    chmod 0600 /sys/class/qcom-haptics/primitive_duration
+    chmod 0666 /sys/class/leds/vibrator_r/f0_save
+    chmod 0666 /sys/class/leds/vibrator_l/f0_save
+    chmod 0666 /dev/aw8697_haptic_r
+    chmod 0666 /dev/aw8697_haptic_l
+    chown system system /dev/aw8697_haptic_r
+    chown system system /dev/aw8697_haptic_l
+    chmod 0666 /sys/class/leds/vibrator_r/activate
+    chmod 0666 /sys/class/leds/vibrator_r/activate_mode
+    chmod 0666 /sys/class/leds/vibrator_r/index
+    chmod 0666 /sys/class/leds/vibrator_r/duration
+    chmod 0666 /sys/class/leds/vibrator_r/gain
+    chmod 0666 /sys/class/leds/vibrator_r/double
+    chmod 0666 /sys/class/leds/vibrator_l/activate
+    chmod 0666 /sys/class/leds/vibrator_l/activate_mode
+    chmod 0666 /sys/class/leds/vibrator_l/index
+    chmod 0666 /sys/class/leds/vibrator_l/duration
+    chmod 0666 /sys/class/leds/vibrator_l/gain
+    chmod 0666 /sys/class/leds/vibrator_l/double
+    write /sys/class/leds/vibrator/trigger "transient"
 
 service aera-stock-mount /system/bin/sh /system/bin/aera-stock-mount.sh
     class core
@@ -35,6 +67,39 @@ service aera-touch-load /system/bin/sh /system/bin/aera-touch-load.sh
     oneshot
     disabled
     seclabel u:r:recovery:s0
+
+# Load Wi-Fi, audio and haptics modules in place from the real /vendor_dlkm
+# and /system_dlkm.  This must not wait for /data decryption, and it never
+# copies a module into /tmp or the recovery ramdisk.
+service aera-real-modules /system/bin/sh /system/bin/aera-real-modules.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.qti.vibrator /vendor/bin/hw/vendor.qti.hardware.vibrator.service
+    class hal
+    user system
+    group system input
+    disabled
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    setenv RICHTAP_DEVICE_PATH /dev/aw8697_haptic_r;/dev/aw8697_haptic_l
+    setenv ENV_RICHTAP_CONFIG_PATH /odm/etc/aac_richtap_r.config;/odm/etc/aac_richtap_l.config
+
+# Lenovo's dual-haptics HAL is a second, independent interface used by the
+# stock settings/test path.  Start it alongside QTI so the AERA test button
+# works regardless of which implementation the UI probes first.
+service vendor.lenovo.vibrator_dual /vendor/bin/hw/vendor.lenovo.hardware.vibrator_dual-service
+    interface aidl vendor.lenovo.hardware.vibrator_dual.IVibratorDual/default
+    class hal
+    user system
+    group system input
+    disabled
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
 
 service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.allocator-service
     class core
@@ -92,19 +157,39 @@ on property:twrp.modules.loaded=true
 # real partitions are mounted and verified.  Their binaries and libraries
 # stay on /vendor, /vendor_dlkm and /odm; they are never duplicated here.
 on property:aera.stock.mounted=true
-    exec -- /system/bin/restorecon --recursive /vendor/bin /vendor/lib64 /vendor/etc /odm
+    # Never relabel the real /vendor, /vendor_dlkm or /odm partitions here.
+    # They are mounted read-only and already carry the stock SELinux labels.
     start aera-touch-load
+    start aera-real-modules
     start aera-graphics-allocator
+    # SPU mode must be selected before gatekeeper starts.  This matches the
+    # stock vendor build.prop and the validated fix3b TWRP/OrangeFox chain.
+    setprop vendor.gatekeeper.is_security_level_spu 1
+    stop vendor.gatekeeper_default
     start vendor.qseecomd
     start vendor.minkdaemon
-    start vendor.sec_nvm
-    start vendor.gatekeeper_default
+    start vendor.secretkeeper
     start vendor.keymint
+    start vendor.keymint-spu-qti
+    start vendor.spdaemon
+    start vendor.sec_nvm
+    start vendor.qti.hardware.spu.service
+    start vendor.gatekeeper_spu
     start vendor.spu_weaver
     start vendor.boot-qti
     start vendor.thermal-engine
     start aera-low-brightness
+    # TEE services are now up; restart keystore2 so it re-opens the SPU
+    # KeyMint/Gatekeeper stack instead of keeping its pre-mount connection.
+    setprop crypto.ready 1
+    restart keystore2
     write /sys/class/backlight/panel0-backlight/brightness 300
+
+# Wi-Fi/audio have their own consumers of this property.  Start both vibrator
+# HALs only after the real haptics modules are resident.
+on property:aera.modules.loaded=true
+    start vendor.qti.vibrator
+    start vendor.lenovo.vibrator_dual
 
 on init
     setprop sys.usb.configfs 1

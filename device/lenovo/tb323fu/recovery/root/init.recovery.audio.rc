@@ -3,9 +3,9 @@
 # TB323FU recovery audio services.
 #
 # All binaries and shared libraries come from the installed stock vendor
-# partition mounted by aera-audio-bootstrap.  The kernel modules are loaded by
-# AERA from the real vendor_dlkm by name; this file only starts user-space
-# services after post.decrypt.modules is set.
+# partition mounted by aera-audio-bootstrap.  The kernel modules are loaded in
+# place from the real vendor_dlkm by aera-real-modules.sh; this file only starts
+# user-space services after aera.modules.loaded is set.
 
 service aera-audio-pd-mapper /mnt/aera-stock/vendor/bin/pd-mapper
     class core
@@ -43,5 +43,5 @@ service aera-audio-bootstrap /system/bin/aera-audio-bootstrap
     group root system audio media wakelock
     seclabel u:r:recovery:s0
 
-on property:post.decrypt.modules=true
+on property:aera.modules.loaded=true
     start aera-audio-bootstrap

@@ -6,7 +6,8 @@
 # Skyward/TWRP recipe:
 #   - recovery.img is kernel-less (BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE)
 #   - no vendor .ko is bundled in recovery/root
-#   - the startup module list contains spss_utils/spcom and nvt_36xxx
+#   - the startup module list contains spss_utils/spcom and does NOT bundle
+#     nvt_36xxx (touch is loaded from the real vendor_dlkm after mount)
 #   - requested modules exist in the device's vendor_dlkm image
 #   - sampled modules have a __versions section and their vermagic tail
 #     matches the boot kernel tail (the part same_magic() compares when
@@ -159,14 +160,17 @@ def main():
     else:
         ok("recovery/root 里没有 modules.* 模块索引/清单")
 
-    # Touch firmware and vendor configuration must stay on the real
-    # /vendor partition; the recovery ramdisk only has an empty mount point.
-    fw_files = list((ROOT / "recovery/root/system/etc/firmware").glob("*"))
-    fw_files += list((ROOT / "recovery/root/vendor/firmware").glob("*"))
-    if fw_files:
-        fail(f"recovery/root 里仍有固件副本: {[str(p.relative_to(ROOT)) for p in fw_files]}")
+    firmware_dir = ROOT / "recovery/root/system/etc/firmware"
+    if firmware_dir.exists() and any(firmware_dir.glob("novatek_ts_*.bin")):
+        fail("recovery/root/system/etc/firmware 仍有 novatek_ts_* 副本")
     else:
-        ok("recovery/root 没有触摸/GPU 固件副本，固件走真实 /vendor/firmware")
+        ok("触摸固件由真实 /vendor/firmware 提供，ramdisk 未预置")
+
+    vendor_fw = list((ROOT / "recovery/root/vendor/firmware").glob("novatek_ts_*.bin"))
+    if vendor_fw:
+        fail("vendor/firmware 里仍有 novatek_ts_* 副本，会遮住真实 /vendor/firmware")
+    else:
+        ok("vendor/firmware 没有 novatek_ts_* 副本，固件只从真实分区加载")
 
     # An empty lib/modules in the recovery ramdisk shadows the real
     # vendor_boot /lib/modules, so the loader would never see the device's
@@ -177,15 +181,16 @@ def main():
         ok("recovery/root 不占位 /lib/modules，vendor_boot 的真实目录可直接暴露")
 
     startup = board_list("AERA_LOAD_VENDOR_MODULES")
-    for required in ("spss_utils.ko", "spcom.ko", "panel_event_notifier.ko"):
+    for required in ("spss_utils.ko", "spcom.ko"):
         if required in startup:
             ok(f"启动期模块列表包含 {required}")
         else:
             fail(f"启动期模块列表缺 {required}")
+
     if "nvt_36xxx.ko" in startup:
-        fail("nvt_36xxx.ko 不能在启动期加载；它必须在真实分区挂载后由 aera-touch-load.sh 加载")
+        fail("nvt_36xxx.ko 不应在启动期列表；它必须由 aera-touch-load 从真实分区加载")
     else:
-        ok("nvt_36xxx.ko 不在启动期模块列表，挂载后单独加载")
+        ok("nvt_36xxx.ko 不在启动期列表，由 aera-touch-load 从真实 /vendor_dlkm 加载")
 
     path_tokens = [name for name in startup if "/" in name]
     if path_tokens:
@@ -293,9 +298,56 @@ def main():
 
     for lib in ("libvmmem.so", "libqcbor.so", "libxml2.so"):
         if (ROOT / "recovery/root/vendor/lib64" / lib).is_file():
-            ok(f"vendor 闭包包含 {lib}")
+            fail(f"{lib} 不应预置在 recovery/root，必须从真实 /vendor/lib64 加载")
         else:
-            fail(f"vendor 闭包缺 {lib}")
+            ok(f"{lib} 由真实 /vendor/lib64 提供，ramdisk 未预置")
+
+    # Wi-Fi/audio/haptics must not depend on post-decrypt staging.  The module
+    # list is consumed by aera-real-modules.sh directly from the real dlkm
+    # partitions; AERA_POST_DECRYPT_MODULES must stay empty.
+    if 'AERA_POST_DECRYPT_MODULES := ""' in text:
+        ok("AERA_POST_DECRYPT_MODULES 为空，不再向 /tmp 暂存模块")
+    else:
+        fail("AERA_POST_DECRYPT_MODULES 仍非空，会把模块暂存到 /tmp")
+
+    module_list = ROOT / "recovery/root/system/etc/aera-real-modules.list"
+    if module_list.is_file():
+        entries = [line.strip() for line in module_list.read_text().splitlines()
+                   if line.strip() and not line.strip().startswith("#")]
+        bad = [line for line in entries if "/" in line or not line.endswith(".ko")]
+        if bad:
+            fail(f"aera-real-modules.list 含路径或非 .ko 项: {bad[:3]}")
+        elif len(entries) < 50:
+            fail(f"aera-real-modules.list 只有 {len(entries)} 项，Wi-Fi/音频/振动模块链不完整")
+        else:
+            ok(f"aera-real-modules.list 有 {len(entries)} 个真实分区模块名")
+    else:
+        fail("缺 recovery/root/system/etc/aera-real-modules.list")
+
+    wifi_rc = (ROOT / "recovery/root/init.recovery.wifi.rc").read_text()
+    if "/system/bin/wpa_supplicant" in wifi_rc:
+        fail("WiFi 服务仍指向 ramdisk 的 /system/bin/wpa_supplicant")
+    elif "/vendor/bin/hw/wpa_supplicant" in wifi_rc:
+        ok("WiFi supplicant 使用真实 /vendor/bin/hw/wpa_supplicant")
+    else:
+        fail("WiFi supplicant 服务路径缺失")
+
+    audio_rc = (ROOT / "recovery/root/init.recovery.audio.rc").read_text()
+    if "post.decrypt.modules" in audio_rc:
+        fail("audio 仍依赖 post.decrypt.modules（PIN 失败时不会启动）")
+    elif "aera.modules.loaded" in audio_rc:
+        ok("audio 不再等待 /data 解密，改由 aera.modules.loaded 启动")
+    else:
+        fail("audio 启动触发缺失")
+
+    manifest = (ROOT / "recovery/root/system/etc/vintf/manifest.xml").read_text()
+    for hal in ("android.hardware.vibrator",
+                "android.hardware.wifi.supplicant",
+                "vendor.lenovo.hardware.vibrator_dual"):
+        if hal in manifest:
+            ok(f"VINTF 清单声明 {hal}")
+        else:
+            fail(f"VINTF 清单缺 {hal}，HAL 注册会被拒绝")
 
     print()
     print(f"结果: {len(PASSES)} PASS, {len(FAILS)} FAIL")

@@ -110,9 +110,10 @@ Wi-Fi 不在启动期加载。`AERA_POST_DECRYPT_MODULES` 在 userdata 解密后
 - 屏幕 8.8" 3040×1904，165 Hz；面板 `baldur_nt36523_csot_3k_dsc_vid`
   （NT36523 + CSOT，DSC video mode）
 - 触摸 Novatek NVT-ts-spi，`novatek-mp-criteria-609F`，模块 `nvt_36xxx.ko`
-- 触摸固件不再放进 recovery ramdisk：运行时从真实 `/vendor/firmware`
-  读取 `novatek_ts_fw.bin` / `novatek_ts_mp.bin`；`recovery/root` 只保留
-  `/lib/firmware` 空挂载点，挂载脚本会 bind 真实 `/vendor/firmware`。
+- 触摸固件必须放 `recovery/root/system/etc/firmware/novatek_ts_{fw,mp}.bin`，
+  与 `system_a.img` 同名文件逐字节一致（SHA-256 前 16 位分别是
+  `a374ce0856f9e61b`、`1b83ad26961e9e44`）；不要放 `/vendor/firmware`
+  下的 CSOT 变体。
 - 亮度 `/sys/class/backlight/panel0-backlight/brightness`，面板
   `qcom,mdss-dsi-bl-max-level = <0xfff>` → `AERA_MAX_BRIGHTNESS := 4095`
 - A/B + 独立 `recovery_a/recovery_b`（各 100 MiB，LUN4）
@@ -265,9 +266,10 @@ python3 tools/verify_tree.py \
 ```
 
 期望结果：kernel-less recovery、recovery/root 无 `.ko`、无 `modules.*`、
-无 `lib/modules` 占位；启动列表含 `spss_utils.ko`/`spcom.ko`，`nvt_36xxx.ko`
-在真实分区挂载后由 `aera-touch-load.sh` 加载；显示、触摸、解密服务都由
-`aera-stock-mount.sh` 验证真实 `/vendor`、`/vendor_dlkm`、`/odm` 后才启动。
+无 `lib/modules` 占位、启动列表含
+`spss_utils.ko`/`spcom.ko`/`nvt_36xxx.ko`、49 个启动模块在
+vendor_dlkm / vendor_boot 存在、`nvt_36xxx.ko` 带 `__versions`、模块与 boot
+内核 vermagic 尾部一致。
 
 重新提取用户态 blob（可选，刷机包路径按实际改）：
 
