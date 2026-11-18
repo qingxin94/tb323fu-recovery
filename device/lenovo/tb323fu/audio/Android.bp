@@ -4,8 +4,8 @@
 //
 // This is deliberately device-local: it loads the AGM/PAL runtime from the
 // installed stock vendor partition and never bundles a kernel module.  The
-// kernel modules are requested by name in BoardConfig.mk and loaded by AERA
-// from the real /vendor_dlkm.
+// kernel modules are requested on demand by aera-load-group.sh and loaded from
+// the real /vendor_dlkm, never from this ramdisk.
 
 cc_binary {
     name: "aera-audio-service",

@@ -1,0 +1,34 @@
+# Base fallback order, used only when the real partitions do not provide
+# modules.dep.  This is the minimal SPU transport plus touch; it deliberately
+# contains no Wi-Fi, audio or haptics module.
+
+qcom_smd.ko
+qcom_glink.ko
+qcom_glink_smem.ko
+rproc_qcom_common.ko
+qcom_aoss.ko
+qcom-scm.ko
+mem_buf_dev.ko
+mdt_loader.ko
+qcom_pil_info.ko
+qcom_ramdump.ko
+socinfo.ko
+pinctrl-msm.ko
+qti-regmap-debugfs.ko
+qcom_ipc_logging.ko
+qcom_q6v5.ko
+qcom_q6v5_pas.ko
+qmi_helpers.ko
+qcom_sysmon.ko
+frpc-adsprpc.ko
+qcom_glink_spss.ko
+qcom_spss.ko
+spss_utils.ko
+spcom.ko
+qce50_dlkm.ko
+qcrypto-msm_dlkm.ko
+qrng_dlkm.ko
+smcinvoke_dlkm.ko
+tz_log_dlkm.ko
+tmecom-intf_dlkm.ko
+nvt_36xxx.ko

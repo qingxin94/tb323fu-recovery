@@ -1,0 +1,4 @@
+# Haptics fallback order, used only when modules.dep is missing.
+qcom-hv-haptics.ko
+haptic.ko
+qbt_handler.ko

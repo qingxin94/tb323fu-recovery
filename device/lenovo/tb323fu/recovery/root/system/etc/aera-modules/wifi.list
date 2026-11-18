@@ -1,0 +1,7 @@
+# Wi-Fi group: loaded ONLY when sys.aera.wifi.load=1 is set.
+#
+# Top-level modules only; aera-load-group.sh resolves the rest from the real
+# modules.dep.  This prevents the boot-time 25-module chain that caused 900E.
+
+cfg80211.ko
+qca_cld3_peach_v2.ko

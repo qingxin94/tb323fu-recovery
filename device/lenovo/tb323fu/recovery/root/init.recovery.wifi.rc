@@ -1,12 +1,27 @@
-# AERA Wi-Fi bring-up for Lenovo TB323FU (QCA "peach" / WCN7750)
+# AERA Wi-Fi bring-up for Lenovo TB323FU (QCA Peach / WCN7750)
 #
-# The module chain is loaded in place from the real system_dlkm/vendor_dlkm by
-# aera-real-modules.sh.  No module is staged under /tmp and nothing depends on
-# a successful /data decryption.  The radio is only brought up when the user
-# toggles WLAN (sys.aera.wlan.up=1), not at boot.
+# This group is never started at boot.  It is started only by an explicit
+# property:
+#
+#   setprop sys.aera.wifi.load 1
+#
+# aera-load-group.sh loads cfg80211 + qca_cld3_peach_v2 and their real
+# modules.dep dependency graph from /vendor_dlkm and /system_dlkm.  Then the
+# cnss driver probe is released with fs_ready=1 and wpa_supplicant starts.
 
-on property:aera.modules.loaded=true
-    setprop sys.aera.wlan.up 0
+service aera-wifi-modules /system/bin/sh /system/bin/aera-load-group.sh wifi
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+on property:sys.aera.wifi.load=1
+    setprop sys.aera.wifi.load 0
+    start aera-wifi-modules
+
+on property:aera.wifi.loaded=true
     start cnss-daemon
     wait /sys/bus/platform/drivers/cnss2/b0000000.qcom,cnss-peach/fs_ready 5
     chmod 222 /sys/bus/platform/drivers/cnss2/b0000000.qcom,cnss-peach/fs_ready
@@ -18,14 +33,6 @@ on property:wifi.driver.ready=true
     mkdir /tmp/recovery/sockets 0777 root root
     start wpa_supplicant
 
-on property:sys.aera.wlan.up=1 && property:wifi.driver.ready=true
-    setprop sys.aera.wlan.up 0
-    mkdir /tmp/recovery 0777 root root
-    mkdir /tmp/recovery/sockets 0777 root root
-    start wpa_supplicant
-
-# The supplicant binary stays on the real vendor partition.  Its control
-# socket is in /tmp so it is usable before /data is decryptable.
 service wpa_supplicant /vendor/bin/hw/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tmp/recovery/sockets -c/vendor/etc/wifi/wpa_supplicant.conf
     user root
     group root wifi inet

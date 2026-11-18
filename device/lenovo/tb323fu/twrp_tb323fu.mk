@@ -4,16 +4,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-# Inherit AOSP recovery base
 $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit_only.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/emulated_storage.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
-
-# Inherit TWRP/AERA common configuration
 $(call inherit-product, vendor/twrp/config/common.mk)
-
-# Inherit device configuration
 $(call inherit-product, device/lenovo/tb323fu/device.mk)
 
 PRODUCT_DEVICE := tb323fu
@@ -21,7 +16,6 @@ PRODUCT_NAME := twrp_tb323fu
 PRODUCT_BRAND := Lenovo
 PRODUCT_MODEL := Lenovo Legion Tab 8.8 Gen5
 PRODUCT_MANUFACTURER := Lenovo
-
 PRODUCT_GMS_CLIENTID_BASE := android-lenovo
 
 PRODUCT_BUILD_PROP_OVERRIDES += \
@@ -29,9 +23,5 @@ PRODUCT_BUILD_PROP_OVERRIDES += \
 
 BUILD_FINGERPRINT := Lenovo/TB323FU/TB323FU:16/BQ2A.250831.001-BP2A.250605.031.A3/ZUXOS_2.0.12.088_260610_PRC:user/release-keys
 
-# AERA UI
 AERA_STATUS_ICONS_ALIGN := center
-
-# magiskboot / prebuilt binaries 是 4K 页对齐；Android 16 默认按 16K 检查。
-# 旧树就是因为这项在 91% 被拦下，显式关闭，和已验证的旧构建保持一致。
 PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false

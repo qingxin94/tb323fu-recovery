@@ -1,11 +1,27 @@
-# SPDX-License-Identifier: Apache-2.0
-#
 # TB323FU recovery audio services.
 #
-# All binaries and shared libraries come from the installed stock vendor
-# partition mounted by aera-audio-bootstrap.  The kernel modules are loaded in
-# place from the real vendor_dlkm by aera-real-modules.sh; this file only starts
-# user-space services after aera.modules.loaded is set.
+# Audio is an independent on-demand group:
+#
+#   setprop sys.aera.audio.load 1
+#
+# aera-load-group.sh loads the audio codec/machine modules from the real
+# vendor_dlkm (dependency graph from modules.dep), then aera-audio-bootstrap
+# starts the stock AGM/PAL services.  Nothing here runs at boot.
+
+service aera-audio-modules /system/bin/sh /system/bin/aera-load-group.sh audio
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+on property:sys.aera.audio.load=1
+    setprop sys.aera.audio.load 0
+    start aera-audio-modules
+
+on property:aera.audio.loaded=true
+    start aera-audio-bootstrap
 
 service aera-audio-pd-mapper /mnt/aera-stock/vendor/bin/pd-mapper
     class core
@@ -42,6 +58,3 @@ service aera-audio-bootstrap /system/bin/aera-audio-bootstrap
     user root
     group root system audio media wakelock
     seclabel u:r:recovery:s0
-
-on property:aera.modules.loaded=true
-    start aera-audio-bootstrap

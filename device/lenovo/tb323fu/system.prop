@@ -1,16 +1,14 @@
-# Charger
+# TB323FU recovery properties
+
 ro.charger.enable_suspend=true
 
-# Gatekeeper: TB323FU uses the SPU security level, matching the stock
-# vendor build.prop and the validated fix3b TWRP/OrangeFox chain.
+# SPU-backed Gatekeeper is the stock security level on this device.
 vendor.gatekeeper.is_security_level_spu=1
 
-# FBE metadata / dm-default-key must use the wrapped-key v2 format.
+# FBE metadata / dm-default-key uses the wrapped-key v2 format.
 ro.crypto.dm_default_key.options_format.version=2
 
-# Legacy Keymaster 4.x compatibility fallback used by the recovery decrypt
-# path.  Stock KeyMint is AIDL V4/V3; this only selects the TWRP helper path.
+# Legacy Keymaster 4.x compatibility helper path.
 keymaster_ver=4.x
 
-# FUSE passthrough
 persist.sys.fuse.passthrough.enable=true

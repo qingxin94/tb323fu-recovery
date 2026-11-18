@@ -38,9 +38,6 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" ]; then
 	export AERA_USE_XZ_UTILS=1
 	export AERA_ALLOW_EARLY_SETTINGS_LOAD=1
 	export AERA_USE_UPDATED_MAGISKBOOT=1
-	# Recovery is kernel-less: the boot partition supplies the kernel and this
-	# image carries only a ramdisk. Keep the installer ZIP out to save ramdisk
-	# space; do not enable AERA_USE_DMSETUP because the device uses DMCTL.
 	export AERA_DELETE_MAGISK_ADDON=1
 	export AERA_USE_FSCK_EROFS_BINARY=1
 	export AERA_USE_PATCHELF_BINARY=1

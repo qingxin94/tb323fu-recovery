@@ -1,0 +1,6 @@
+# Haptics group: loaded ONLY when sys.aera.haptics.load=1 is set.
+# Never part of the boot chain.
+
+qcom-hv-haptics.ko
+haptic.ko
+qbt_handler.ko

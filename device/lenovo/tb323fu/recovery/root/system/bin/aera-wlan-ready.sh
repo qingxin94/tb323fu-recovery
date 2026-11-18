@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # Wait for the real Peach WLAN driver to publish wlan0.  The module chain is
-# loaded from /vendor_dlkm and /system_dlkm by aera-real-modules.sh; nothing is
-# copied into the recovery ramdisk.
+# loaded on demand from /vendor_dlkm and /system_dlkm by aera-load-group.sh;
+# nothing is copied into the recovery ramdisk.
 #
 # This used to be an unbounded "until" loop, which left the WiFi service in
 # "running" forever when the driver never appeared and gave the UI no error.

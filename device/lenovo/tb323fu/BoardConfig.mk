@@ -1,13 +1,13 @@
 #
-# AERA Recovery device configuration for Lenovo Legion Tab 8.8" Gen 5
-# Model: TB323FU (Lenovo Legion Y700 Gen 5, Qualcomm Canoe / SM8850)
+# AERA Recovery device configuration for Lenovo Legion Y700 Gen 5
+# Model: TB323FU (SM8850 / Canoe)
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 
 DEVICE_PATH := device/lenovo/tb323fu
 
-# Keep the build tolerant while porting; remove once the tree is fully clean.
+# Keep build tolerant while the device tree is being brought up.
 ALLOW_MISSING_DEPENDENCIES := true
 BUILD_BROKEN_DUP_RULES := true
 BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true
@@ -29,16 +29,9 @@ TARGET_BOOTLOADER_BOARD_NAME := TB323FU
 TARGET_NO_BOOTLOADER := true
 
 # Kernel
-# The firmware package ships two closely related 6.12.30 builds:
-#   boot.img        -> 6.12.30-android16-5-g1750f757fabe-ab13938768-4k
-#   vmlinux         -> 6.12.30-android16-5-maybe-dirty-4k
-# The vendor_dlkm modules carry __versions CRCs.  With CONFIG_MODVERSIONS=y,
-# same_magic() skips the release/localversion prefix and compares only
-# " SMP preempt mod_unload modversions aarch64"; symbol CRCs then enforce ABI.
-# So the stock boot kernel can load these modules; no kernel replacement is
-# required.  prebuilt/kernel is only an optional reference/boot experiment,
-# and recovery itself is kernel-less like stock.  Never patch vermagic or
-# bundle vendor .ko files.
+# The stock boot image supplies the kernel for recovery mode.  This recovery
+# image is ramdisk-only (kernel_size = 0), exactly like stock.  Do not bundle
+# vendor .ko files: they are loaded from the real vendor_dlkm/system_dlkm.
 TARGET_KERNEL_ARCH := arm64
 TARGET_KERNEL_HEADER_ARCH := arm64
 BOARD_KERNEL_IMAGE_NAME := Image
@@ -51,17 +44,12 @@ BOARD_RAMDISK_USE_LZ4 := true
 
 # Recovery image geometry (GPT, LUN4)
 BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600
-# Stock boot.img is 96 MiB and holds the kernel (ramdisk_size = 0).
-# Recovery mode loads that kernel; recovery.img itself has kernel_size = 0.
 BOARD_BOOTIMAGE_PARTITION_SIZE := 100663296
 BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE := 8388608
 BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 100663296
 BOARD_DTBOIMG_PARTITION_SIZE := 75497472
 
-# Recovery is a ramdisk-only image, exactly like stock: kernel_size = 0.
-# The bootloader boots it with the kernel from the boot partition (g1750).
-# That kernel accepts the maybe-dirty vendor modules through __versions CRC
-# matching, so recovery must not try to carry or replace the boot kernel.
+# Recovery is kernel-less; boot partition supplies the kernel.
 BOARD_EXCLUDE_KERNEL_FROM_RECOVERY_IMAGE := true
 
 # A/B
@@ -85,10 +73,6 @@ AB_OTA_PARTITIONS := \
 
 # Verified boot
 BOARD_AVB_ENABLE := true
-# 不生成 chained vbmeta_system：本构建只产出 recovery.img，设备上沿用
-# stock vbmeta_system。缺少 key 时保留下面这行会让 Soong fsgen 报
-# "No key found for chained avb partition vbmeta_system"。
-# BOARD_AVB_VBMETA_SYSTEM := system system_ext product system_dlkm
 
 # Dynamic partitions (super = 20,480 MiB, LP group qti_dynamic_partitions)
 BOARD_SUPER_PARTITION_SIZE := 21474836480
@@ -136,7 +120,7 @@ AERA_INCLUDE_LPTOOLS := true
 AERA_INCLUDE_REPACKTOOLS := true
 AERA_INCLUDE_RESETPROP := true
 
-# Root Manager supports the device's 6.12 GKI kernel
+# Root manager supports the device's 6.12 GKI kernel
 AERA_ROOT_MODULE_KERNELS := 6.12
 
 # Debug
@@ -184,91 +168,33 @@ AERA_DEFAULT_LANGUAGE := zh_CN
 AERA_EXTRA_LANGUAGES := true
 
 # ---------------------------------------------------------------------------
-# Vendor modules: names only. AERA mounts the real /vendor and /vendor_dlkm
-# partitions and loads the .ko files that are already on the device. Nothing
-# here is copied into the recovery ramdisk.
+# Module policy: boot loads nothing automatically.
 #
-# Startup chain (SPU/weaver -> touch/display/USB/haptics/battery/crypto):
+# AERA's own TW_LOAD_VENDOR_MODULES / TW_POST_DECRYPT_MODULES paths must stay
+# empty.  The device tree mounts the real partitions and then loads small,
+# explicit groups from /vendor_dlkm and /system_dlkm:
+#
+#   base     -> touch + SPU/weaver prerequisites (boot, small)
+#   wifi     -> cfg80211 + qca_cld3_peach_v2 (on demand only)
+#   audio    -> audio module group (on demand only)
+#   haptics  -> haptics module group (on demand only)
+#
+# The group loader resolves module dependencies from the real modules.dep
+# before calling insmod.  Nothing is copied to /tmp and no .ko is placed in
+# the recovery ramdisk.
 # ---------------------------------------------------------------------------
-AERA_LOAD_VENDOR_MODULES := "\
-    qcom_smd.ko \
-    qcom_glink.ko \
-    qcom_glink_smem.ko \
-    rproc_qcom_common.ko \
-    qcom_aoss.ko \
-    qcom-scm.ko \
-    mem_buf_dev.ko \
-    mdt_loader.ko \
-    qcom_pil_info.ko \
-    qcom_ramdump.ko \
-    socinfo.ko \
-    pinctrl-msm.ko \
-    qti-regmap-debugfs.ko \
-    qcom_ipc_logging.ko \
-    qcom_q6v5.ko \
-    qcom_q6v5_pas.ko \
-    qmi_helpers.ko \
-    qcom_sysmon.ko \
-    frpc-adsprpc.ko \
-    qcom_glink_spss.ko \
-    qcom_spss.ko \
-    spss_utils.ko \
-    spcom.ko \
-    panel_event_notifier.ko \
-    drm_display_helper.ko \
-    msm_drm.ko \
-    msm_kgsl.ko \
-    dwc3-msm.ko \
-    phy-msm-ssusb-qmp.ko \
-    phy-qcom-qmp-combo.ko \
-    phy-msm-m31-eusb2.ko \
-    phy-qcom-eusb2-repeater.ko \
-    phy-qcom-m31-eusb2.ko \
-    phy-generic.ko \
-    repeater.ko \
-    redriver.ko \
-    nb7vpq904m.ko \
-    qcom-hv-haptics.ko \
-    haptic.ko \
-    qbt_handler.ko \
-    qti_battery_charger.ko \
-    qti_battery_debug.ko \
-    qce50_dlkm.ko \
-    qcrypto-msm_dlkm.ko \
-    qrng_dlkm.ko \
-    smcinvoke_dlkm.ko \
-    tz_log_dlkm.ko \
-    tmecom-intf_dlkm.ko"
-
-# AERA's aera_build.mk still installs a ramdisk copy of wpa_supplicant and
-# wpa_cli when OF_ENABLE_WLAN=1.  The init service now executes the real
-# /vendor/bin/hw/wpa_supplicant, and wlan.cpp resolves wpa_cli from
-# /vendor/bin, so remove those ramdisk copies before recovery.img is packed.
-# This is a cleanup of generated output, never a write to the real partitions.
-BOARD_RECOVERY_IMAGE_PREPARE += if [ -n "$(TARGET_RECOVERY_ROOT_OUT)" ] && [ -d "$(TARGET_RECOVERY_ROOT_OUT)/system/bin" ]; then rm -f "$(TARGET_RECOVERY_ROOT_OUT)/system/bin/wpa_supplicant" "$(TARGET_RECOVERY_ROOT_OUT)/system/bin/wpa_cli" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/libkeystore-engine-wifi-hidl.so" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/android.hardware.wifi.common-V2-ndk.so" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/android.hardware.wifi.supplicant-V4-ndk.so"; fi
-
-# Wi-Fi/audio/haptics modules: loaded in place from the real system_dlkm and
-# vendor_dlkm immediately after those partitions are mounted.  They do not wait
-# for userdata decryption.  The list is in
-# recovery/root/system/etc/aera-real-modules.list and is consumed by
-# aera-real-modules.sh; nothing is staged under /tmp.
-# The Wi-Fi/audio/haptics module list used to live here and AERA staged it
-# into /tmp, loading it only after /data decryption.  That made every one of
-# those functions depend on a successful PIN decrypt.  The list is now in
-# recovery/root/system/etc/aera-real-modules.list and aera-real-modules.sh
-# insmods each module directly from the real /vendor_dlkm or /system_dlkm.
+AERA_LOAD_VENDOR_MODULES := ""
 AERA_POST_DECRYPT_MODULES := ""
-
-# aera-real-modules.sh insmods each name directly from the real /vendor_dlkm or
-# /system_dlkm.  aera-audio-bootstrap then starts the stock AGM/PAL user-space
-# services.  Do not copy any .ko into recovery/root.
-
 AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 AERA_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
 AERA_USE_TOOLBOX := true
 AERA_INPUT_BLACKLIST := "hbtp_vm"
 
-# eSE / OMAPI (device has ST54L). Keep OMAPI off in the first build because
-# the vendor image does not expose the secure-element HAL/lib closure; turn it
-# on after adding those blobs.
+# AERA's WLAN integration can install ramdisk copies of wpa_supplicant and
+# its client libraries when AERA_ENABLE_WLAN=1.  This tree uses the real
+# /vendor binary and libraries.  Remove any generated ramdisk copies before
+# the image is packed; this never touches the real partitions.
+BOARD_RECOVERY_IMAGE_PREPARE += if [ -n "$(TARGET_RECOVERY_ROOT_OUT)" ] && [ -d "$(TARGET_RECOVERY_ROOT_OUT)/system/bin" ]; then rm -f "$(TARGET_RECOVERY_ROOT_OUT)/system/bin/wpa_supplicant" "$(TARGET_RECOVERY_ROOT_OUT)/system/bin/wpa_cli" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/libkeystore-engine-wifi-hidl.so" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/android.hardware.wifi.common-V2-ndk.so" "$(TARGET_RECOVERY_ROOT_OUT)/system/lib64/android.hardware.wifi.supplicant-V4-ndk.so"; fi
+
+# eSE / OMAPI
 AERA_INCLUDE_OMAPI := false
