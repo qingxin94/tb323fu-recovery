@@ -113,7 +113,7 @@ jobs:
             sleep 10
             continue
           fi
-          bad=$(grep -oP 'remove-project (path|name)="[^"]*"' /tmp/sync.log | head -1 | sed 's/remove-project [a-z]*="//;s/"//')
+          bad=$(grep -oP 'remove-project (path|name)="[^"]*"' /tmp/sync.log | head -1 | sed 's/remove-project [a-z]*="//;s/"//' || true)
           if [ -z "$bad" ]; then
             echo "=== sync failed, no remove-project error ==="
             tail -40 /tmp/sync.log
