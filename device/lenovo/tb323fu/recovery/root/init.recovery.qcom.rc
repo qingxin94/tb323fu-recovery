@@ -11,12 +11,12 @@
 #      demand; nothing from those groups is loaded at boot.
 #
 
-import /system/etc/init/aera-crypto.rc
+import /vendor/etc/init/aera-crypto.rc
 import /init.recovery.wifi.rc
 import /init.recovery.audio.rc
-# AERA's recovery build installs keystore2.rc here.  Without this import,
-# `restart keystore2` has no service definition to restart.
-import /system/etc/init/keystore2.rc
+# keystore2.rc is part of AERA's recovery system image and is loaded by the
+# recovery init parser; importing it twice would duplicate its keystore2
+# service.  Keep the same layout as V13 and do not import it here.
 
 on early-init
     # Qualcomm Mapper5/SnapAlloc path must be enabled before the allocator.
@@ -120,6 +120,8 @@ on property:aera.stock.mounted=true
     start aera-base-modules
     # Real /vendor is mounted; the display allocator binary stays on vendor.
     start aera-graphics-allocator
+    # Same brightness fallback as V13; the panel node is from the real kernel.
+    write /sys/class/backlight/panel0-backlight/brightness 300
     # /persist/time/ats_2 is now readable; set the clock from RTC + ats_2.
     start aera-clock
     # Keep the stock time daemon (network/modem time path) available.

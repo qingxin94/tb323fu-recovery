@@ -44,6 +44,6 @@ resolves dependencies from the real `modules.dep` under `/vendor_dlkm` or
 - `recovery/root/system/bin/aera-stock-mount.sh`
 - `recovery/root/system/bin/aera-load-group.sh`
 - `recovery/root/system/etc/aera-modules/*.list`
-- `recovery/root/system/etc/init/aera-crypto.rc`
+- `recovery/root/vendor/etc/init/aera-crypto.rc`
 - `recovery/root/system/etc/recovery.fstab`
 - `recovery/root/system/etc/twrp.flags`

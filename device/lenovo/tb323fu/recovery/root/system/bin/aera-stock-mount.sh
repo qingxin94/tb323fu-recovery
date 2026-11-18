@@ -66,7 +66,8 @@ mount_read_write() {
                 log "remounted $mp rw"
                 return 0
             fi
-            umount "$mp" 2>>"$LOG" || true
+            log "remount rw denied for $mp; keeping existing mount"
+            return 1
         else
             log "already mounted rw $mp"
             return 0
@@ -94,7 +95,7 @@ bind_dir() {
 }
 
 wait_count=0
-while [ "$wait_count" -lt 90 ]; do
+while [ "$wait_count" -lt 180 ]; do
     vendor_ok=1
     mount_read_only vendor /vendor || vendor_ok=0
     mount_read_only vendor_dlkm /vendor_dlkm || vendor_ok=0
@@ -169,6 +170,6 @@ while [ "$wait_count" -lt 90 ]; do
     sleep 1
 done
 
-log "stock partition mount failed after 90s"
+log "stock partition mount failed after 180s"
 setprop aera.stock.mount_failed true
 exit 1
