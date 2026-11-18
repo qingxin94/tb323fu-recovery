@@ -146,7 +146,9 @@ jobs:
         grep -q "snapshot_locksettings" /mnt/work/system/vold/KeystoreInfo.cpp || { echo "vold KeystoreInfo.cpp 没有 locksettings 快照"; exit 1; }
         grep -q "/data/system_de/0/spblob" /mnt/work/bootable/recovery/partitionmanager.cpp || { echo "recovery 没等真实 spblob 目录"; exit 1; }
         grep -q "twrp.module.handler_done" /mnt/work/bootable/recovery/kernel_module_loader.cpp || { echo "handler wait 不在源码分支"; exit 1; }
-        ! grep -q "android::keystore::copySqliteDb();" /mnt/work/bootable/recovery/twrp.cpp || { echo "copySqliteDb 调用仍存在"; exit 1; }
+        grep -q "android::keystore::copySqliteDb();" /mnt/work/bootable/recovery/twrp.cpp || { echo "twrp.cpp 没有刷新 keystore 数据库"; exit 1; }
+        grep -q "android::keystore::copySqliteDb();" /mnt/work/bootable/recovery/partitionmanager.cpp || { echo "Prepare_Crypto_Keystore 仍是空函数"; exit 1; }
+        grep -q '"-wal"' /mnt/work/system/vold/Decrypt.cpp || { echo "vold 没有复制 keystore WAL 集"; exit 1; }
 
     - name: Build recovery
       run: |

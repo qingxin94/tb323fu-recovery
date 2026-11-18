@@ -183,8 +183,12 @@ AERA_EXTRA_LANGUAGES := true
 # before calling insmod.  Nothing is copied to /tmp and no .ko is placed in
 # the recovery ramdisk.
 # ---------------------------------------------------------------------------
-AERA_LOAD_VENDOR_MODULES := ""
-AERA_POST_DECRYPT_MODULES := ""
+# Leave these truly empty (no quote characters).  A quoted empty string is a
+# non-empty make value, which makes AERA compile the module loader and call it
+# at boot; that loader then mounts and unmounts /vendor behind the real-part
+# mount script.  Zero modules must mean "do not build the loader".
+AERA_LOAD_VENDOR_MODULES :=
+AERA_POST_DECRYPT_MODULES :=
 AERA_LOAD_VENDOR_MODULES_EXCLUDE_GKI := true
 AERA_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
 AERA_USE_TOOLBOX := true
