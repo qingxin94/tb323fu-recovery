@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'device/lenovo/tb323fu/**'
+      - 'ci/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
 

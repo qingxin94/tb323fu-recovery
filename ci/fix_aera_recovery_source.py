@@ -20,6 +20,71 @@ def write(p, s):
 
 changed = []
 
+# 3) Decrypt_User: do not depend on locksettings.db for the spblob handle.
+#    The device has /data/system_de/0/spblob/*.pwd even when locksettings.db
+#    cannot be read from recovery.  A missing handle makes Get_Password_Type()
+#    return 0, which used to make Decrypt_User() bail out before it ever tried
+#    the synthetic-password path.
+decrypt_p = os.path.join(root, "system/vold/Decrypt.cpp")
+if os.path.exists(decrypt_p) and "aera_spblob_handle_from_dir" not in read(decrypt_p):
+    s = read(decrypt_p)
+    helper = r'''static std::string aera_spblob_handle_from_dir(userid_t user_id) {
+    char dir_path[PATH_MAX];
+    snprintf(dir_path, sizeof(dir_path), "/data/system_de/%d/spblob", user_id);
+    DIR* dir = opendir(dir_path);
+    if (!dir)
+        return std::string();
+    std::string handle;
+    struct dirent* de = nullptr;
+    while ((de = readdir(dir)) != nullptr) {
+        const char* name = de->d_name;
+        size_t len = strlen(name);
+        if (len <= 4 || strcmp(name + len - 4, ".pwd") != 0)
+            continue;
+        handle.assign(name, len - 4);
+        break;
+    }
+    closedir(dir);
+    return handle;
+}
+
+'''
+    anchor = 'inline std::string hidlVec2String'
+    if anchor not in s:
+        raise SystemExit("Decrypt.cpp: hidlVec2String anchor missing")
+    s = s.replace(anchor, helper + anchor, 1)
+    handle_re = re.compile(r'(\s*)std::string handle_str = keystore_info\.getHandle\(user_id\);')
+    s, n = handle_re.subn(
+        r'\1std::string handle_str = keystore_info.getHandle(user_id);\n'
+        r'\1if (handle_str.empty())\n'
+        r'\1    handle_str = aera_spblob_handle_from_dir(user_id);',
+        s,
+    )
+    if n == 0:
+        raise SystemExit("Decrypt.cpp: handle lookup anchor missing")
+    old_gate = '    if (Get_Password_Type(user_id, filename) == 0 && !Default_Password) {'
+    new_gate = ('    struct stat spblob_st;\n'
+                '    bool has_spblob = (stat("/data/system_de/0/spblob", &spblob_st) == 0);\n'
+                '    if (Get_Password_Type(user_id, filename) == 0 && !Default_Password && !has_spblob) {')
+    if old_gate not in s:
+        raise SystemExit("Decrypt.cpp: Decrypt_User gate anchor missing")
+    s = s.replace(old_gate, new_gate, 1)
+    write(decrypt_p, s)
+    changed.append("Decrypt.cpp: spblob handle fallback + early gate bypass")
+
+# 4) partitionmanager: wait for the real spblob directory, not the legacy key.
+p = os.path.join(rec, "partitionmanager.cpp")
+if os.path.exists(p):
+    s = read(p)
+    old_wait = '\t\tint retry_count = 10;\n\t\twhile (!TWFunc::Path_Exists("/data/system/users/gatekeeper.password.key") && --retry_count)\n\t\t\tusleep(2000); // A small sleep is needed after mounting /data to ensure reliable decrypt...maybe because of DE?'
+    new_wait = '\t\tint retry_count = 10;\n\t\twhile (!TWFunc::Path_Exists("/data/system_de/0/spblob") && --retry_count)\n\t\t\tusleep(2000); // Wait for the real synthetic-password directory, not legacy gatekeeper files.'
+    if old_wait in s:
+        s = s.replace(old_wait, new_wait, 1)
+        write(p, s); changed.append("partitionmanager.cpp: wait for /data/system_de/0/spblob")
+    elif "Wait for the real synthetic-password directory" not in s:
+        raise SystemExit("partitionmanager.cpp: legacy gatekeeper wait anchor missing")
+
+
 # 1) copySqliteDb
 p = os.path.join(rec, "twrp.cpp")
 if os.path.exists(p):
