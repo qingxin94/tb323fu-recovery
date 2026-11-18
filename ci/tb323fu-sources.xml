@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <!-- Source-level TB323FU fixes, not build-time patches. -->
+  <remove-project name="android_system_vold" />
+  <project path="system/vold" name="qingxin94/android_system_vold"
+           revision="tb323fu-decrypt" />
+
+  <remove-project name="android_bootable_recovery" />
+  <project path="bootable/recovery" name="qingxin94/android_bootable_recovery"
+           revision="tb323fu-decrypt" />
+</manifest>

@@ -94,7 +94,9 @@ jobs:
         # 用 AERA 官方 remove-minimal.xml（删 601 项）。
         curl -fsSL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
           -o .repo/local_manifests/remove-minimal.xml
-        xmllint --noout .repo/local_manifests/remove-minimal.xml
+        # 源码级修复：system/vold 和 bootable/recovery 指向 tb323fu-decrypt 分支。
+        cp "$GITHUB_WORKSPACE/ci/tb323fu-sources.xml" .repo/local_manifests/tb323fu-sources.xml
+        xmllint --noout .repo/local_manifests/remove-minimal.xml .repo/local_manifests/tb323fu-sources.xml
         set -o pipefail
         for i in $(seq 1 2000); do
           echo "=== sync attempt $i ==="
@@ -134,12 +136,17 @@ jobs:
         echo "recovery/root 下 .ko 数: $(find /mnt/work/device/lenovo/tb323fu/recovery/root -name '*.ko' | wc -l)"
         ls -la /mnt/work/device/lenovo/tb323fu | head
 
-    - name: Fix AERA recovery source for TB323FU
+    - name: Verify source-level TB323FU fixes
       run: |
         test -z "$(find /mnt/work/device/lenovo/tb323fu/recovery/root -name '*.ko' -print -quit)" || { echo "recovery/root 仍含 .ko，拒绝构建"; exit 1; }
-        python3 "$GITHUB_WORKSPACE/ci/fix_aera_recovery_source.py" /mnt/work
-        grep -q "android::keystore::copySqliteDb();" /mnt/work/bootable/recovery/twrp.cpp && { echo "copySqliteDb 调用仍存在"; exit 1; } || true
-        grep -q "twrp.module.handler_done" /mnt/work/bootable/recovery/kernel_module_loader.cpp || { echo "handler wait 未打入"; exit 1; }
+        # 这些修复已经提交在 qingxin94/android_system_vold 与
+        # qingxin94/android_bootable_recovery 的 tb323fu-decrypt 分支，
+        # 不再在 CI 里改源码。
+        grep -q "aera_synthetic_handle_from_dir" /mnt/work/system/vold/Decrypt.cpp || { echo "vold Decrypt.cpp 不是 tb323fu-decrypt 分支"; exit 1; }
+        grep -q "snapshot_locksettings" /mnt/work/system/vold/KeystoreInfo.cpp || { echo "vold KeystoreInfo.cpp 没有 locksettings 快照"; exit 1; }
+        grep -q "/data/system_de/0/spblob" /mnt/work/bootable/recovery/partitionmanager.cpp || { echo "recovery 没等真实 spblob 目录"; exit 1; }
+        grep -q "twrp.module.handler_done" /mnt/work/bootable/recovery/kernel_module_loader.cpp || { echo "handler wait 不在源码分支"; exit 1; }
+        ! grep -q "android::keystore::copySqliteDb();" /mnt/work/bootable/recovery/twrp.cpp || { echo "copySqliteDb 调用仍存在"; exit 1; }
 
     - name: Build recovery
       run: |
