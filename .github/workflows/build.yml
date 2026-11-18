@@ -91,17 +91,18 @@ jobs:
         cd /mnt/work
         repo init -u https://github.com/AERA-Recovery/android_manifest.git -b aera-16.0 --depth=1
         mkdir -p .repo/local_manifests
-        # 用 AERA 官方 remove-minimal.xml（删 601 项）。
-        curl -fsSL https://raw.githubusercontent.com/AERA-Recovery/android_manifest/aera-16.0/remove-minimal.xml \
-          -o .repo/local_manifests/remove-minimal.xml
-        # 源码级修复：system/vold 和 bootable/recovery 指向 tb323fu-decrypt 分支。
+        # AERA's twrp-default.xml already includes remove-minimal.xml.  Copying
+        # it again as a local manifest duplicates all 601 remove-project
+        # entries and makes repo reject every one of them; the old retry loop
+        # then deleted the local copy line by line, which looked like source
+        # projects were being removed.  Only overlay the two source forks.
         cp "$GITHUB_WORKSPACE/ci/tb323fu-sources.xml" .repo/local_manifests/tb323fu-sources.xml
-        xmllint --noout .repo/local_manifests/remove-minimal.xml .repo/local_manifests/tb323fu-sources.xml
+        xmllint --noout .repo/local_manifests/tb323fu-sources.xml
         set -o pipefail
-        for i in $(seq 1 2000); do
+        for i in $(seq 1 3); do
           echo "=== sync attempt $i ==="
           set +e
-          timeout 45m repo sync -c --force-sync --no-clone-bundle --no-tags -j8 > /tmp/sync.log 2>&1
+          timeout 75m repo sync -c --force-sync --no-clone-bundle --no-tags -j8 > /tmp/sync.log 2>&1
           rc=$?
           set -e
           if [ "$rc" -eq 0 ]; then
@@ -109,19 +110,13 @@ jobs:
             break
           fi
           if [ "$rc" -eq 124 ]; then
-            echo "=== sync timeout after 45m, retry ==="
+            echo "=== sync timeout after 75m, retry ==="
             sleep 10
             continue
           fi
-          bad=$(grep -oP 'remove-project (path|name)="[^"]*"' /tmp/sync.log | head -1 | sed 's/remove-project [a-z]*="//;s/"//' || true)
-          if [ -z "$bad" ]; then
-            echo "=== sync failed, no remove-project error ==="
-            tail -40 /tmp/sync.log
-            exit 1
-          fi
-          echo "=== removing non-existent: $bad ==="
-          sed -i "\|\"$bad\"|d" .repo/local_manifests/remove-minimal.xml
-          sleep 5
+          echo "=== sync failed ==="
+          tail -40 /tmp/sync.log
+          exit 1
         done
         find /mnt/work -name .git -type d -prune -exec rm -rf {} + 2>/dev/null || true
         df -h /
