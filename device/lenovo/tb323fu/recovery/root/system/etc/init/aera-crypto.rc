@@ -1,0 +1,94 @@
+# Own compatibility services for TB323FU recovery.
+# All binaries stay on the real /vendor partition. Nothing here is copied into ramdisk.
+
+service vendor.qseecomd /vendor/bin/qseecomd
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    socket notify-topology stream 660 system drmrpc
+    class core
+    user root
+    group root drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.keymint /vendor/bin/hw/android.hardware.security.onekeymint-service-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class early_hal
+    user system
+    group system drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.keymint-spu-qti /vendor/bin/hw/android.hardware.security.keymint-service-spu-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class early_hal
+    user system
+    group system drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.spdaemon /vendor/bin/spdaemon
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class core
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.sec_nvm /vendor/bin/sec_nvm
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class core
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.minkdaemon /vendor/bin/hlosminkdaemon
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class late_start
+    user system
+    group system
+    capabilities WAKE_ALARM BLOCK_SUSPEND
+    socket ssgtzd stream 0660 system system
+    socket hlos_mink_opener stream 0660 system system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.qti.hardware.spu.service /vendor/bin/hw/vendor.qti.hardware.spu-service
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class hal
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class early_hal
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.gatekeeper_spu /vendor/bin/hw/android.hardware.gatekeeper-service-spu-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class early_hal
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class hal
+    user system
+    group system drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.secretkeeper /vendor/bin/hw/android.hardware.security.secretkeeper-service-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class hal
+    user nobody
+    group drmrpc
+    disabled
+    seclabel u:r:recovery:s0

@@ -1,62 +1,50 @@
-# AERA crypto / gatekeeper services for TB323FU.
-#
-# These binaries and their ABI-matched libraries stay on the real /vendor
-# and /odm partitions.  This file only defines services; it does not copy
-# any stock binary or library into the recovery ramdisk.  Services start
-# after aera-stock-mount.sh has mounted and verified those partitions.
+# Own compatibility services for TB323FU recovery.
+# All binaries stay on the real /vendor partition. Nothing here is copied into ramdisk.
 
 service vendor.qseecomd /vendor/bin/qseecomd
-    setenv LD_LIBRARY_PATH /vendor/lib64:/system/lib64
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
     socket notify-topology stream 660 system drmrpc
     class core
-    disabled
     user root
     group root drmrpc
-    seclabel u:r:recovery:s0
-
-# SecretKeeper is part of the stock TB323FU SPU KeyMint stack.  Without it
-# the SPU KeyMint/Gatekeeper services can start but the keystore2 handoff is
-# incomplete, which is the state AERA was in.
-service vendor.secretkeeper /vendor/bin/hw/android.hardware.security.secretkeeper-service-qti
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
-    class hal
     disabled
-    user nobody
-    group drmrpc
-    seclabel u:r:recovery:s0
-
-service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
-    class early_hal
-    disabled
-    user system
-    group system
-    seclabel u:r:recovery:s0
-
-# SPU Gatekeeper.  This is the implementation selected by
-# vendor.gatekeeper.is_security_level_spu=1; the default rust service above
-# is kept only as the non-SPU fallback and is not started on this device.
-service vendor.gatekeeper_spu /vendor/bin/hw/android.hardware.gatekeeper-service-spu-qti
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
-    class early_hal
-    disabled
-    user system
-    group system
     seclabel u:r:recovery:s0
 
 service vendor.keymint /vendor/bin/hw/android.hardware.security.onekeymint-service-qti
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
     class early_hal
-    disabled
     user system
     group system drmrpc
+    disabled
     seclabel u:r:recovery:s0
 
-# Mink transport used by the OneKeyMint/Gatekeeper TEE channel.  Stock
-# starts this from early-boot; in recovery it must wait until the vendor
-# modules (qseecom/qce50) have been loaded.
+service vendor.keymint-spu-qti /vendor/bin/hw/android.hardware.security.keymint-service-spu-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class early_hal
+    user system
+    group system drmrpc
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.spdaemon /vendor/bin/spdaemon
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class core
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+    shutdown critical
+
+service vendor.sec_nvm /vendor/bin/sec_nvm
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class core
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
 service vendor.minkdaemon /vendor/bin/hlosminkdaemon
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
     class late_start
     user system
     group system
@@ -66,56 +54,42 @@ service vendor.minkdaemon /vendor/bin/hlosminkdaemon
     disabled
     seclabel u:r:recovery:s0
 
-# SPU daemon.  It creates/owns the SPU NVM transport and must be running
-# before sec_nvm and spu_weaver open /dev/spss_utils.  Stock starts it as a
-# core service; in recovery it is explicitly started after /persist is rw.
-service vendor.spdaemon /vendor/bin/spdaemon
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
-    class core
-    user system
-    group system
-    shutdown critical
-    disabled
-    seclabel u:r:recovery:s0
-
-# Secure NVM / SPU support.  Kept disabled until explicitly started so a
-# missing /mnt/vendor/persist does not affect the rest of recovery.
-service vendor.sec_nvm /vendor/bin/sec_nvm
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
-    class core
-    user system
-    group system
-    disabled
-    seclabel u:r:recovery:s0
-
-# SPU manager (ISPUManager/default).  TWRP 16 can run without it, but the
-# validated fix3b AERA/OrangeFox tree starts it on canoe; keep it in the
-# chain so the SPU KeyMint/Gatekeeper stack has the same service topology.
 service vendor.qti.hardware.spu.service /vendor/bin/hw/vendor.qti.hardware.spu-service
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
     class hal
     user system
     group system
-    shutdown critical
     disabled
     seclabel u:r:recovery:s0
 
-# SPU-backed Weaver.  Android 16 FBE metadata uses IWeaver/default; this is
-# the only Weaver implementation present in the stock TB323FU vendor image.
-service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
-    class hal
-    user system
-    group system drmrpc
-    disabled
-    seclabel u:r:recovery:s0
-
-# StrongBox KeyMint.  It registers IKeyMintDevice/strongbox, not default.
-service vendor.keymint-spu-qti /vendor/bin/hw/android.hardware.security.keymint-service-spu-qti
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
     class early_hal
     user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.gatekeeper_spu /vendor/bin/hw/android.hardware.gatekeeper-service-spu-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class early_hal
+    user system
+    group system
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.spu_weaver /vendor/bin/hw/android.hardware.weaver-service-spu-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class hal
+    user system
     group system drmrpc
     disabled
     seclabel u:r:recovery:s0
-#
+
+service vendor.secretkeeper /vendor/bin/hw/android.hardware.security.secretkeeper-service-qti
+    setenv LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/odm/lib64/hw:/product/lib64
+    class hal
+    user nobody
+    group drmrpc
+    disabled
+    seclabel u:r:recovery:s0

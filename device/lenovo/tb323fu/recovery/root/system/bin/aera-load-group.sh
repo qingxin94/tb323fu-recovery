@@ -33,12 +33,14 @@ prop_for_group() {
         wifi) echo aera.wifi.loaded ;;
         audio) echo aera.audio.loaded ;;
         haptics) echo aera.haptics.loaded ;;
+        v13) echo aera.v13.loaded ;;
         *) echo "" ;;
     esac
 }
 
 normalize() {
-    echo "$1" | tr '-' '_' | sed 's/\.ko$//'
+    name="${1##*/}"
+    echo "$name" | tr '-' '_' | sed 's/\.ko$//'
 }
 
 is_loaded() {
@@ -59,7 +61,7 @@ was_seen() {
 # Find the actual file for a module name.  Search direct paths first, then
 # one level of versioned subdirectories, then a bounded recursive search.
 find_module_file() {
-    wanted="$1"
+    wanted="${1##*/}"
     case "$wanted" in
         *.ko) ;;
         *) wanted="${wanted}.ko" ;;
@@ -125,7 +127,10 @@ load_one() {
     mod="$1"
     name="$(normalize "$mod")"
     is_loaded "$name" && { log "already loaded: $name"; return 0; }
-    was_seen "$name" && { log "seen already: $name"; return 0; }
+    # Do not return success just because this module was seen earlier:
+    # a previous dependency attempt may have failed, and the old short-circuit
+    # silently skipped qca_cld3_peach_v2 after marking it seen.
+    was_seen "$name" && log "retrying seen: $name"
     mark_seen "$name"
 
     # Load dependencies first.  They are looked up by basename, so versioned

@@ -1,15 +1,10 @@
 # AERA Wi-Fi bring-up for Lenovo TB323FU (QCA Peach / WCN7750)
 #
-# This group is never started at boot.  It is started only by an explicit
-# property:
-#
-#   setprop sys.aera.wifi.load 1
-#
-# aera-load-group.sh loads cfg80211 + qca_cld3_peach_v2 and their real
-# modules.dep dependency graph from /vendor_dlkm and /system_dlkm.  Then the
-# cnss driver probe is released with fs_ready=1 and wpa_supplicant starts.
+# Recovery UI sets sys.aera.wlan.up=1. V15's original rc only watched
+# sys.aera.wifi.load, so the module service never started. Keep both
+# triggers for compatibility.
 
-service aera-wifi-modules /system/bin/sh /system/bin/aera-load-group.sh wifi
+service aera-wifi-modules /system/bin/sh /system/bin/aera-wifi-prep.sh
     class core
     user root
     group root
@@ -17,8 +12,16 @@ service aera-wifi-modules /system/bin/sh /system/bin/aera-load-group.sh wifi
     disabled
     seclabel u:r:recovery:s0
 
+on property:sys.aera.wlan.up=1
+    setprop sys.aera.wlan.up 0
+    setprop wifi.driver.ready false
+    setprop aera.wifi.driver.failed false
+    start aera-wifi-modules
+
 on property:sys.aera.wifi.load=1
     setprop sys.aera.wifi.load 0
+    setprop wifi.driver.ready false
+    setprop aera.wifi.driver.failed false
     start aera-wifi-modules
 
 on property:aera.wifi.loaded=true
@@ -29,6 +32,11 @@ on property:aera.wifi.loaded=true
     start aera-wlan-ready
 
 on property:wifi.driver.ready=true
+    mkdir /data/vendor 0771 root root
+    chmod 0771 /data/vendor
+    mkdir /data/vendor/wifi 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa/sockets 0771 wifi wifi
     mkdir /tmp/recovery 0777 root root
     mkdir /tmp/recovery/sockets 0777 root root
     start wpa_supplicant
@@ -38,6 +46,7 @@ service wpa_supplicant /vendor/bin/hw/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/tm
     group root wifi inet
     disabled
     seclabel u:r:recovery:s0
+    setenv AERA_NO_AIDL 1
 
 service cnss-daemon /vendor/bin/cnss-daemon -n -l
     user root

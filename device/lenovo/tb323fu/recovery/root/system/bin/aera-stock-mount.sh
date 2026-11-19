@@ -66,8 +66,7 @@ mount_read_write() {
                 log "remounted $mp rw"
                 return 0
             fi
-            log "remount rw denied for $mp; keeping existing mount"
-            return 1
+            umount "$mp" 2>>"$LOG" || true
         else
             log "already mounted rw $mp"
             return 0
@@ -85,6 +84,27 @@ mount_read_write() {
     return 1
 }
 
+
+mount_vfat_rw() {
+    part="$1"; mp="$2"
+    if mounted "$mp"; then
+        if grep -q " $mp ro," /proc/mounts 2>/dev/null; then
+            umount "$mp" 2>>"$LOG" || true
+        else
+            log "already mounted rw $mp"
+            return 0
+        fi
+    fi
+    src="$(find_part "$part")" || { log "missing partition $part"; return 1; }
+    mkdir -p "$mp" 2>/dev/null || true
+    if mount -t vfat -o rw,fmask=0000,dmask=0000 "$src" "$mp" 2>>"$LOG"; then
+        log "mounted rw $src -> $mp (vfat, fmask=0000,dmask=0000)"
+        return 0
+    fi
+    log "FAILED rw mount $part ($src) -> $mp"
+    return 1
+}
+
 # Bind a directory only if the source exists.
 bind_dir() {
     src="$1"; dst="$2"
@@ -95,7 +115,7 @@ bind_dir() {
 }
 
 wait_count=0
-while [ "$wait_count" -lt 180 ]; do
+while [ "$wait_count" -lt 90 ]; do
     vendor_ok=1
     mount_read_only vendor /vendor || vendor_ok=0
     mount_read_only vendor_dlkm /vendor_dlkm || vendor_ok=0
@@ -111,9 +131,10 @@ while [ "$wait_count" -lt 180 ]; do
             src="$(find_part modem)" || true
             if [ -n "${src:-}" ]; then
                 mkdir -p /vendor/firmware_mnt 2>/dev/null || true
-                for fs in vfat ext4; do
-                    mount -t "$fs" -o ro "$src" /vendor/firmware_mnt 2>>"$LOG" && break
-                done
+                # v17: spdaemon runs as system; vfat's default fmask=0077
+                # makes macch1p.sig root-only and spcom_load_app reports
+                # "not exist". Mount world-readable so SP init can load it.
+                mount -t vfat -o ro,fmask=0000,dmask=0000 "$src" /vendor/firmware_mnt 2>>"$LOG" || true
             fi
         fi
 
@@ -133,8 +154,8 @@ while [ "$wait_count" -lt 180 ]; do
             fi
         fi
 
-        # SPU NVM state; read-write vfat.
-        mount_read_write spunvm /mnt/vendor/spunvm vfat || true
+        # SPU NVM state; read-write vfat, world-readable for system spdaemon.
+        mount_vfat_rw spunvm /mnt/vendor/spunvm || true
 
         # metadata is needed for FBE; keep it writable for AERA/vold.
         mount_read_write metadata /metadata f2fs ext4 || true
@@ -170,6 +191,6 @@ while [ "$wait_count" -lt 180 ]; do
     sleep 1
 done
 
-log "stock partition mount failed after 180s"
+log "stock partition mount failed after 90s"
 setprop aera.stock.mount_failed true
 exit 1

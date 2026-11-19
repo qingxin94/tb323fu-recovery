@@ -1,36 +1,26 @@
-# Copyright (c) 2017-2018,2020-2021 The Linux Foundation. All rights reserved.
-#
 # AERA recovery init for Lenovo TB323FU (Canoe / SM8850)
 #
-# Boot policy:
-#   1. mount only the real partitions; never copy vendor files into ramdisk
-#   2. load a very small base group for touch + SPU/weaver
-#   3. start the crypto services and let AERA's decrypt path read
-#      /data/system_de/<user>/spblob
-#   4. Wi-Fi / audio / haptics / time are independent groups, started on
-#      demand; nothing from those groups is loaded at boot.
+# Split is intentional:
+#   - base mount + base modules: Skyward order
+#   - Wi-Fi: Skyward chain, on demand only
+#   - display + decryption: V13 order
 #
+# Nothing from Wi-Fi/audio is loaded or started at boot.
 
-import /vendor/etc/init/aera-crypto.rc
+import /system/etc/init/aera-crypto.rc
 import /init.recovery.wifi.rc
 import /init.recovery.audio.rc
-# AERA installs keystore2.rc at /system/etc/init/keystore2.rc, but the base
-# recovery init.rc does not import it.  This import is what defines the
-# keystore2 service used by "restart keystore2" below; dropping it leaves
-# keystore2 undefined and PIN decryption has no key store to talk to.
 import /system/etc/init/keystore2.rc
 
 on early-init
-    # Qualcomm Mapper5/SnapAlloc path must be enabled before the allocator.
     setprop vendor.gralloc.enable_snapalloc true
-    # Keep the legacy Keymaster 4.x helper and wrapped-key v2 format.
     setprop keymaster_ver 4.x
     setprop ro.crypto.dm_default_key.options_format.version 2
-    # Kernel firmware lookup uses the real vendor firmware partition.
-    write /sys/module/firmware_class/parameters/path /vendor/firmware
+    # Real /vendor/build.prop is only readable after the vendor partition is
+    # mounted, which is after property loading. Set the two TEE switches here.
+    setprop vendor.gatekeeper.is_security_level_spu 1
+    setprop vendor.spu.rkp_enabled true
 
-# The kernel_module_loader is deliberately not used for this tree:
-# AERA_LOAD_VENDOR_MODULES is empty.  These services do all loading explicitly.
 service aera-stock-mount /system/bin/sh /system/bin/aera-stock-mount.sh
     class core
     user root
@@ -47,33 +37,8 @@ service aera-base-modules /system/bin/sh /system/bin/aera-load-group.sh base
     disabled
     seclabel u:r:recovery:s0
 
-service aera-clock /system/bin/sh /system/bin/aera-clock.sh
-    class core
-    user root
-    group root
-    oneshot
-    disabled
-    seclabel u:r:recovery:s0
 
-# Stock Qualcomm time daemon.  It uses the real RTC/persist time state and
-# keeps the network/modem time path available; it is not a boot dependency.
-service vendor.time_daemon /vendor/bin/time_daemon
-    class core
-    user system
-    group system
-    capabilities SYS_TIME
-    disabled
-    seclabel u:r:recovery:s0
-
-service aera-haptics-modules /system/bin/sh /system/bin/aera-load-group.sh haptics
-    class core
-    user root
-    group root
-    oneshot
-    disabled
-    seclabel u:r:recovery:s0
-
-service aera-spblob-check /system/bin/sh /system/bin/aera-spblob-check.sh
+service aera-v13-modules /system/bin/sh /system/bin/aera-load-group.sh v13
     class core
     user root
     group root
@@ -88,8 +53,44 @@ service aera-graphics-allocator /vendor/bin/hw/vendor.qti.hardware.display.alloc
     group system graphics
     seclabel u:r:recovery:s0
 
-# Haptics services are only started after the haptics group is explicitly
-# loaded from the real vendor_dlkm.  They are not part of the boot chain.
+service aera-metadata-mount /system/bin/sh /system/bin/aera-mount-metadata.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service aera-firmware-finder /system/bin/sh /system/bin/aera-firmware-finder.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service aera-low-brightness /system/bin/sh /system/bin/aera-low-brightness.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.boot-qti /vendor/bin/hw/android.hardware.boot-service.qti
+    class early_hal
+    disabled
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
+service vendor.thermal-engine /vendor/bin/thermal-engine-v2
+    class core
+    disabled
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
 service vendor.qti.vibrator /vendor/bin/hw/vendor.qti.hardware.vibrator.service
     class hal
     user system
@@ -100,87 +101,10 @@ service vendor.qti.vibrator /vendor/bin/hw/vendor.qti.hardware.vibrator.service
     setenv RICHTAP_DEVICE_PATH "/dev/aw8697_haptic_r;/dev/aw8697_haptic_l"
     setenv ENV_RICHTAP_CONFIG_PATH "/odm/etc/aac_richtap_r.config;/odm/etc/aac_richtap_l.config"
 
-service vendor.lenovo.vibrator_dual /vendor/bin/hw/vendor.lenovo.hardware.vibrator_dual-service
-    interface aidl vendor.lenovo.hardware.vibrator_dual.IVibratorDual/default
-    class hal
-    user system
-    group system input
-    disabled
-    seclabel u:r:recovery:s0
-    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
-
 on init
     setprop sys.usb.configfs 1
-    # AERA reads this before building its user list.  Force user 0 into the
-    # decrypt pass; this is the user whose protector lives in
-    # /data/system_de/0/spblob on this device.
     setprop twrp.user.0.decrypt 0
-
-on property:aera.stock.mounted=true
-    # The real vendor/vendor_dlkm/system_dlkm/odm partitions are now mounted.
-    # Start the small base group first: touch + SPU/weaver prerequisites.
-    start aera-base-modules
-    # Real /vendor is mounted; the display allocator binary stays on vendor.
-    start aera-graphics-allocator
-    # Same brightness fallback as V13; the panel node is from the real kernel.
-    write /sys/class/backlight/panel0-backlight/brightness 300
-    # /persist/time/ats_2 is now readable; set the clock from RTC + ats_2.
-    start aera-clock
-    # Keep the stock time daemon (network/modem time path) available.
-    start vendor.time_daemon
-
-on property:aera.base.loaded=true
-    # Do not fail the UI if one crypto service is missing; start the stock
-    # services in order and leave their failures in the log.
-    setprop vendor.gatekeeper.is_security_level_spu 1
-    stop vendor.gatekeeper_default
-    start vendor.qseecomd
-    start vendor.minkdaemon
-    start vendor.secretkeeper
-    start vendor.keymint
-    start vendor.keymint-spu-qti
-    start vendor.spdaemon
-    start vendor.sec_nvm
-    start vendor.qti.hardware.spu.service
-    start vendor.gatekeeper_spu
-    start vendor.spu_weaver
-    start aera-spblob-check
-    # Give the TEE stack time to publish its services before keystore2 opens
-    # them.  This is a bounded wait; it cannot block the recovery UI forever.
-    wait /dev/spcom 5
-    wait /dev/spss_utils 5
-    setprop crypto.ready 1
-    restart keystore2
-
-on property:sys.aera.haptics.load=1
-    setprop sys.aera.haptics.load 0
-    start aera-haptics-modules
-
-on property:aera.haptics.loaded=true
-    # The stock haptics nodes are created by the real modules; normalise their
-    # permissions here, without copying any driver or firmware into ramdisk.
-    chown system system /sys/class/qcom-haptics/primitive_duration
-    chmod 0600 /sys/class/qcom-haptics/primitive_duration
-    chown system system /dev/aw8697_haptic_r
-    chown system system /dev/aw8697_haptic_l
-    chmod 0666 /dev/aw8697_haptic_r
-    chmod 0666 /dev/aw8697_haptic_l
-    chmod 0666 /sys/class/leds/vibrator_r/f0_save
-    chmod 0666 /sys/class/leds/vibrator_l/f0_save
-    chmod 0666 /sys/class/leds/vibrator_r/activate
-    chmod 0666 /sys/class/leds/vibrator_l/activate
-    chmod 0666 /sys/class/leds/vibrator_r/activate_mode
-    chmod 0666 /sys/class/leds/vibrator_l/activate_mode
-    chmod 0666 /sys/class/leds/vibrator_r/index
-    chmod 0666 /sys/class/leds/vibrator_l/index
-    chmod 0666 /sys/class/leds/vibrator_r/duration
-    chmod 0666 /sys/class/leds/vibrator_l/duration
-    chmod 0666 /sys/class/leds/vibrator_r/gain
-    chmod 0666 /sys/class/leds/vibrator_l/gain
-    chmod 0666 /sys/class/leds/vibrator_r/double
-    chmod 0666 /sys/class/leds/vibrator_l/double
-    start vendor.qti.vibrator
-    start vendor.lenovo.vibrator_dual
+    start aera-metadata-mount
 
 on property:ro.boot.usbcontroller=*
     setprop sys.usb.controller ${ro.boot.usbcontroller}
@@ -189,8 +113,77 @@ on property:ro.boot.usbcontroller=*
     wait /sys/class/udc/${ro.boot.usbcontroller} 1
 
 on fs
-    wait /dev/block/platform/soc/${ro.boot.bootdevice}
+    # Skyward base mount order: wait physical partitions, start BootControl,
+    # then mount the real partitions.
+    wait /dev/block/platform/soc/${ro.boot.bootdevice} 10
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
-    # Mount the real partitions only after bootdevice/by-name is available.
-    # This also keeps the recovery UI from starting before /vendor exists.
+    wait /dev/block/bootdevice/by-name/persist 10
+    wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 10
+    start vendor.boot-qti
     start aera-stock-mount
+
+on property:aera.stock.mounted=true
+    # Skyward base group only: spss_utils + spcom + nvt_36xxx.
+    start aera-base-modules
+
+on property:aera.base.loaded=true
+    # V13 display/TEE modules, still from the real vendor_dlkm/system_dlkm.
+    start aera-v13-modules
+
+on property:aera.v13.loaded=true
+    setprop twrp.modules.loaded true
+
+on property:twrp.modules.loaded=true
+    # Skyward base service (vibrator) stays; display/decrypt below is V13.
+    start vendor.qti.vibrator
+
+    # V13 display + decryption order.
+    start aera-firmware-finder
+    exec -- /system/bin/restorecon --recursive /vendor/bin /vendor/lib64 /vendor/etc
+    start aera-graphics-allocator
+    # TEE chain is one-shot; start after display so a slow/failed TEE cannot
+    # delay the first UI frame.
+    start aera-crypto-chain
+
+on property:crypto.ready=1
+    # keystore2 starts early, before the TEE services exist. Restart it after
+    # the chain is ready, exactly as the base V13 init did.
+    restart keystore2
+
+
+    start vendor.boot-qti
+    start vendor.thermal-engine
+    start aera-low-brightness
+    write /sys/class/backlight/panel0-backlight/brightness 300
+
+    setprop twrp.module.handler_done true
+    start aera-audit-mounts
+
+service aera-crypto-chain /system/bin/sh /system/bin/aera-crypto-chain.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service aera-audit-mounts /system/bin/sh /system/bin/aera-audit-mounts.sh
+    class core
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service console /system/bin/sh
+    class core
+    console
+    disabled
+    user shell
+    group shell log readproc
+    seclabel u:r:shell:s0
+    setenv HOSTNAME console
+    shutdown critical
+
+on init && property:ro.debuggable=1
+    start console
