@@ -138,6 +138,15 @@ jobs:
         # 已进入 bootable/recovery，不再校验旧的 tb323fu-decrypt 解密定制。
         grep -q 'dual_activate' /mnt/work/bootable/recovery/minuitwrp/events.cpp || { echo "振动 dual sysfs fallback 不在源码"; exit 1; }
 
+    - name: Apply vold clone-profile unlock patch
+      run: |
+        PATCH="$GITHUB_WORKSPACE/ci/vold-clone-unlock.patch"
+        test -f "$PATCH" || { echo "缺少 vold clone-profile 补丁"; exit 1; }
+        cd /mnt/work/system/vold
+        patch -p1 --dry-run < "$PATCH"
+        patch -p1 < "$PATCH"
+        grep -q 'Decrypt_Tied_Profile' Decrypt.cpp || { echo "vold 补丁未生效"; exit 1; }
+
     - name: Build recovery
       run: |
         cd /mnt/work
