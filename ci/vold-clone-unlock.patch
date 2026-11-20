@@ -1,5 +1,5 @@
 diff --git a/Decrypt.cpp b/Decrypt.cpp
-index a02bad8..5a482e1 100755
+index a02bad8..39d744a 100644
 --- a/Decrypt.cpp
 +++ b/Decrypt.cpp
 @@ -26,6 +26,7 @@
@@ -10,7 +10,75 @@ index a02bad8..5a482e1 100755
  
  #include <keyutils.h>
  #include "cutils/properties.h"
-@@ -714,7 +715,8 @@ bool Decrypt_CE_storage(const userid_t user_id, const std::string& secret) {
+@@ -316,9 +317,19 @@ bool Get_Spblob_Data(const std::string& spblob_path, const std::string& handle_s
+ /* C++ replacement for
+  * https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#764 */
+ bool Get_Password_Data(const std::string& spblob_path, const std::string& handle_str, password_data_struct *pwd) {
++	if (pwd == nullptr) return false;
++	pwd->salt = nullptr;
++	pwd->salt_len = 0;
++	pwd->password_handle = nullptr;
++	pwd->handle_len = 0;
+ 	std::string pwd_data;
+ 	if (!Get_Spblob_Data(spblob_path, handle_str, ".pwd", "password", &pwd_data))
+ 		return false;
++	// Reject truncated or inconsistent blobs before dereferencing offsets.
++	if (pwd_data.size() < sizeof(int) + 3 + sizeof(int)) {
++		printf("Password data is too short (%zu bytes)\n", pwd_data.size());
++		return false;
++	}
+ 	// output_hex(pwd_data.data(), pwd_data.size());printf("\n");
+ 	const int* intptr = (const int*)pwd_data.data();
+ 	pwd->password_type = *intptr;
+@@ -334,6 +345,13 @@ bool Get_Password_Data(const std::string& spblob_path, const std::string& handle
+ 	intptr = (const int*)byteptr;
+ 	pwd->salt_len = *intptr;
+ 	endianswap(&pwd->salt_len);
++	const size_t salt_offset = static_cast<size_t>(byteptr - pwd_data.data()) + sizeof(int);
++	if (pwd->salt_len < 0 ||
++		static_cast<size_t>(pwd->salt_len) > pwd_data.size() - salt_offset) {
++		printf("Password data salt length is invalid (%d)\n", pwd->salt_len);
++		pwd->salt_len = 0;
++		return false;
++	}
+ 	if (pwd->salt_len != 0) {
+ 		pwd->salt = malloc(pwd->salt_len);
+ 		if (!pwd->salt) {
+@@ -348,9 +366,20 @@ bool Get_Password_Data(const std::string& spblob_path, const std::string& handle
+ 		printf("Get_Password_Data salt_len is 0\n");
+ 		return false;
+ 	}
++	if (static_cast<size_t>(byteptr - pwd_data.data()) + sizeof(int) > pwd_data.size()) {
++		printf("Password data handle offset is invalid\n");
++		return false;
++	}
+ 	intptr = (const int*)byteptr;
+ 	pwd->handle_len = *intptr;
+ 	endianswap(&pwd->handle_len);
++	const size_t handle_offset = static_cast<size_t>(byteptr - pwd_data.data()) + sizeof(int);
++	if (pwd->handle_len < 0 ||
++		static_cast<size_t>(pwd->handle_len) > pwd_data.size() - handle_offset) {
++		printf("Password data handle length is invalid (%d)\n", pwd->handle_len);
++		pwd->handle_len = 0;
++		return false;
++	}
+ 	if (pwd->handle_len != 0) {
+ 		pwd->password_handle = malloc(pwd->handle_len);
+ 		if (!pwd->password_handle) {
+@@ -428,6 +457,12 @@ bool Get_Weaver_Data(const std::string& spblob_path, const std::string& handle_s
+ 		printf("Get_Weaver_Data: No weaver file found for %s\n", handle_str.c_str());
+ 		return found_file;
+ 	} else {
++		// A truncated .weaver file must not be dereferenced as a struct.
++		if (weaver_data.size() < sizeof(unsigned char) + sizeof(int)) {
++			printf("Get_Weaver_Data: weaver file for %s is too short (%zu bytes)\n",
++				handle_str.c_str(), weaver_data.size());
++			return false;
++		}
+ 		// output_hex(weaver_data.data(), weaver_data.size());printf("\n");
+ 		const unsigned char* byteptr = (const unsigned char*)weaver_data.data();
+ 		wd->version = *byteptr;
+@@ -714,7 +749,8 @@ bool Decrypt_CE_storage(const userid_t user_id, const std::string& secret) {
  
  // /* Decrypt_User_Synth_Pass is the TWRP C++ equivalent to spBasedDoVerifyCredential
  //  * https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/LockSettingsService.java#1998 */
@@ -20,7 +88,18 @@ index a02bad8..5a482e1 100755
  	printf("Attempting to decrypt user's synthetic password\n");
  	bool retval = false;
  	void* weaver_key = NULL;
-@@ -954,7 +956,7 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
+@@ -803,6 +839,10 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
+ 		// Called from https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#780
+ 		// The escrowed weaver key data is prefixed with "weaver-pwd" padded to 128 with nulls with the weaver payload appended then SHA512
+ 		void* weaver_secret = PersonalizedHashBinary(PERSONALISATION_WEAVER_PASSWORD, (const char*)weaver_payload.data(), weaver_payload.size());
++		if (!weaver_secret) {
++			printf("Failed to derive weaver password secret\n");
++			return Free_Return(retval, weaver_key, &pwd);
++		}
+ 		// printf("weaver secret: "); output_hex((unsigned char*)weaver_secret, SHA512_DIGEST_LENGTH); printf("\n");
+ 		// The application ID is the password token and weaver secret appended to each other
+ 		memcpy((void*)&application_id[0], (void*)&password_token[0], PASSWORD_TOKEN_SIZE);
+@@ -954,7 +994,7 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
  		return Free_Return(retval, weaver_key, &pwd);
  	}
  
@@ -29,7 +108,7 @@ index a02bad8..5a482e1 100755
  		return Free_Return(retval, weaver_key, &pwd);
  	}
  
-@@ -1016,6 +1018,165 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
+@@ -1016,6 +1056,187 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
  	return 0;
  }
  
@@ -39,11 +118,27 @@ index a02bad8..5a482e1 100755
 +	std::string path = "/data/system/users/" + std::to_string(user_id) + ".xml";
 +	if (!android::base::ReadFileToString(path, &user_xml)) {
 +		printf("Unable to read profile metadata for user %d\n", user_id);
++		if (user_id >= 900 && user_id <= 999) {
++			*parent = 0;
++			printf("App clone user %d has no readable metadata; using owner 0\n",
++				user_id);
++			return true;
++		}
 +		return false;
 +	}
 +	const std::string attr = "profileGroupId=\"";
 +	size_t pos = user_xml.find(attr);
 +	if (pos == std::string::npos) {
++		// HyperOS app clones are created outside the normal profile path and
++		// often omit profileGroupId from their user metadata. Their profile
++		// key is still tied to the owner, so treat clone users as children of
++		// user 0 instead of falling back to their unusable own credential.
++		if (user_id >= 900 && user_id <= 999) {
++			*parent = 0;
++			printf("App clone user %d has no profileGroupId; using owner 0\n",
++				user_id);
++			return true;
++		}
 +		return false;
 +	}
 +	pos += attr.size();
@@ -51,6 +146,12 @@ index a02bad8..5a482e1 100755
 +	const long parsed_parent = strtol(user_xml.c_str() + pos, &end, 10);
 +	if (end == user_xml.c_str() + pos || parsed_parent < 0 || parsed_parent > 9999 ||
 +		parsed_parent == user_id) {
++		if (user_id >= 900 && user_id <= 999) {
++			*parent = 0;
++			printf("App clone user %d has invalid profileGroupId; using owner 0\n",
++				user_id);
++			return true;
++		}
 +		return false;
 +	}
 +	*parent = static_cast<userid_t>(parsed_parent);
@@ -148,7 +249,7 @@ index a02bad8..5a482e1 100755
 +	}
 +	std::optional<std::vector<uint8_t>> plaintext;
 +	begin_rc = operationResponse.iOperation->finish(cipher_hidlvec, {}, &plaintext);
-+	if (!begin_rc.isOk() || !plaintext) {
++	if (!begin_rc.isOk() || !plaintext || plaintext->empty()) {
 +		printf("Unable to finish tied profile key decryption\n");
 +		return "";
 +	}
@@ -195,7 +296,7 @@ index a02bad8..5a482e1 100755
  extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
  	printf("Attempting to decrypt user\n");
      uint8_t *auth_token;
-@@ -1029,6 +1190,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1029,6 +1250,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
      std::string filename;
      bool Default_Password = (Password == "!");
@@ -210,7 +311,7 @@ index a02bad8..5a482e1 100755
      if (Get_Password_Type(user_id, filename) == 0 && !Default_Password) {
  		printf("Unknown password type\n");
  		return false;
-@@ -1042,7 +1211,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1042,7 +1271,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
  	if (stat("/data/system_de/0/spblob", &st) == 0) {
  		printf("Using synthetic password method\n");
@@ -222,80 +323,18 @@ index a02bad8..5a482e1 100755
  	}
  	// printf("password filename is '%s'\n", filename.c_str());
  	if (stat(filename.c_str(), &st) != 0) {
-diff --git a/FsCrypt.cpp b/FsCrypt.cpp
-index 45dc2ad..84f76fe 100644
---- a/FsCrypt.cpp
-+++ b/FsCrypt.cpp
-@@ -618,15 +618,17 @@ static bool legacy_user0_alias_valid() {
-     return true;
- }
- 
--static bool check_existing_legacy_storage(int flags) {
--    if (!legacy_user0_alias_valid()) return false;
-+static bool check_existing_user_storage(userid_t user_id, int flags) {
-     std::vector<std::string> paths;
-     const std::string root = DATA_MNT_POINT;
-+    const std::string id = std::to_string(user_id);
-     if (flags & android::os::IVold::STORAGE_FLAG_DE) {
--        paths.insert(paths.end(), {root + "/system_de/0", root + "/misc_de/0", root + "/user_de/0"});
-+        paths.insert(paths.end(), {root + "/system_de/" + id, root + "/misc_de/" + id,
-+                                   root + "/user_de/" + id});
-     }
-     if (flags & android::os::IVold::STORAGE_FLAG_CE) {
--        paths.insert(paths.end(), {root + "/system_ce/0", root + "/misc_ce/0", root + "/media/0"});
-+        paths.insert(paths.end(), {root + "/system_ce/" + id, root + "/misc_ce/" + id,
-+                                   root + "/media/" + id});
-     }
-     for (const auto& path : paths) {
-         struct stat st;
-@@ -638,6 +640,11 @@ static bool check_existing_legacy_storage(int flags) {
-     return true;
- }
- 
-+static bool check_existing_legacy_storage(int flags) {
-+    if (!legacy_user0_alias_valid()) return false;
-+    return check_existing_user_storage(0, flags);
-+}
-+
- static bool prepare_special_dirs() {
-     if (preserve_existing_legacy_layout()) return legacy_user0_alias_valid();
- 
-@@ -1008,12 +1015,18 @@ bool fscrypt_prepare_user_storage(const std::string& volume_uuid, userid_t user_
-                << ", user " << user_id << ", flags " << flags;
- 
-     if (preserve_existing_legacy_layout()) {
--        if (!volume_uuid.empty() || user_id != 0) {
--            LOG(ERROR) << "Legacy recovery storage setup supports internal user 0 only";
-+        if (!volume_uuid.empty()) {
-+            LOG(ERROR) << "Legacy recovery storage setup supports internal storage only";
-             return false;
-         }
--        // Preserve the installed system's directory layout and labels during unlock.
--        return check_existing_legacy_storage(flags);
-+        if (user_id == 0) {
-+            // Preserve the installed system's directory layout and labels during unlock.
-+            return check_existing_legacy_storage(flags);
-+        }
-+        // Clone/app-clone users (900+) already have their storage tree created by
-+        // the running system.  In legacy mode we must not try to recreate it as
-+        // user 0, but we can validate the existing per-user directories.
-+        return check_existing_user_storage(user_id, flags);
-     }
- 
-     // Internal storage must be prepared before adoptable storage, since the
-diff --git a/KeyStorage.cpp b/KeyStorage.cpp
-index a186c04..5333928 100644
---- a/KeyStorage.cpp
-+++ b/KeyStorage.cpp
-@@ -618,7 +618,10 @@ bool retrieveKey(const std::string& dir, const KeyAuthentication& auth, KeyBuffe
-         return false;
-     }
-     std::string secdiscardable_hash;
--    if (!readSecdiscardable(dir + "/" + kFn_secdiscardable, &secdiscardable_hash)) return false;
-+    // Secret-protected keys (e.g. CE keys unlocked with a synthetic password)
-+    // are not stored with a secdiscardable file; only Keystore-protected keys are.
-+    if (auth.usesKeystore() &&
-+        !readSecdiscardable(dir + "/" + kFn_secdiscardable, &secdiscardable_hash)) return false;
-     std::string appId = generateAppId(auth, secdiscardable_hash);
-     std::string encryptedMessage;
-     if (!readFileToString(dir + "/" + kFn_encrypted_key, &encryptedMessage)) return false;
+diff --git a/Weaver1.cpp b/Weaver1.cpp
+index a2eeaaa..68bc0df 100644
+--- a/Weaver1.cpp
++++ b/Weaver1.cpp
+@@ -132,6 +132,10 @@ bool Weaver::WeaverVerify(const uint32_t slot, const void* weaver_key, std::vect
+ 	uint32_t keySize;
+ 	if (!GetKeySize(&keySize))
+ 		return false;
++	// PersonalisedHashBinary produces a SHA-512 digest. Reject a malformed
++	// device key size instead of reading past the caller's key buffer.
++	if (weaver_key == nullptr || keySize == 0 || keySize > 64)
++		return false;
+ 	std::vector<uint8_t> key;
+ 	key.resize(keySize);
+ 	uint32_t index = 0;
