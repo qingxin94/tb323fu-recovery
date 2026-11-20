@@ -34,7 +34,7 @@ index a02bad8..39d744a 100644
  	intptr = (const int*)byteptr;
  	pwd->salt_len = *intptr;
  	endianswap(&pwd->salt_len);
-+	const size_t salt_offset = static_cast<size_t>(byteptr - pwd_data.data()) + sizeof(int);
++	const size_t salt_offset = static_cast<size_t>(byteptr - reinterpret_cast<const unsigned char*>(pwd_data.data())) + sizeof(int);
 +	if (pwd->salt_len < 0 ||
 +		static_cast<size_t>(pwd->salt_len) > pwd_data.size() - salt_offset) {
 +		printf("Password data salt length is invalid (%d)\n", pwd->salt_len);
@@ -48,14 +48,14 @@ index a02bad8..39d744a 100644
  		printf("Get_Password_Data salt_len is 0\n");
  		return false;
  	}
-+	if (static_cast<size_t>(byteptr - pwd_data.data()) + sizeof(int) > pwd_data.size()) {
++	if (static_cast<size_t>(byteptr - reinterpret_cast<const unsigned char*>(pwd_data.data())) + sizeof(int) > pwd_data.size()) {
 +		printf("Password data handle offset is invalid\n");
 +		return false;
 +	}
  	intptr = (const int*)byteptr;
  	pwd->handle_len = *intptr;
  	endianswap(&pwd->handle_len);
-+	const size_t handle_offset = static_cast<size_t>(byteptr - pwd_data.data()) + sizeof(int);
++	const size_t handle_offset = static_cast<size_t>(byteptr - reinterpret_cast<const unsigned char*>(pwd_data.data())) + sizeof(int);
 +	if (pwd->handle_len < 0 ||
 +		static_cast<size_t>(pwd->handle_len) > pwd_data.size() - handle_offset) {
 +		printf("Password data handle length is invalid (%d)\n", pwd->handle_len);
