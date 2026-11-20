@@ -1,5 +1,5 @@
 diff --git a/Decrypt.cpp b/Decrypt.cpp
-index a02bad8..8ea279b 100755
+index a02bad8..6906d89 100755
 --- a/Decrypt.cpp
 +++ b/Decrypt.cpp
 @@ -26,6 +26,7 @@
@@ -102,7 +102,7 @@ index a02bad8..8ea279b 100755
 +	auto rc = keystore->getKeyEntry(descriptor, &keyEntryResponse);
 +	if (!rc.isOk()) {
 +		printf("Unable to get tied profile key '%s': %s\n",
-+			descriptor.alias.c_str(), rc.getDescription().c_str());
++			record.alias.c_str(), rc.getDescription().c_str());
 +		return "";
 +	}
 +
@@ -150,7 +150,7 @@ index a02bad8..8ea279b 100755
 +		return "";
 +	}
 +
-+	std::string profile_password(plaintext->data(), plaintext->size());
++	std::string profile_password(reinterpret_cast<const char*>(plaintext->data()), plaintext->size());
 +	printf("Decrypted tied profile key '%s' (credential length %zu)\n",
 +		record.alias.c_str(), profile_password.size());
 +	return profile_password;
