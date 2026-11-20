@@ -5,6 +5,11 @@
 #
 
 AERA_MAINTAINER := TB323FU port
+# Native panel is 3040 x 1904. AERA takes both axes in the stock theme's
+# 1080-wide units and multiplies them by 4/3, so the logical canvas must be
+# 1904 x 3040 (portrait) / 3040 x 1904 (landscape). Setting only the height
+# leaves the default 1440 width and stretches every circle and card horizontally.
+AERA_SCREEN_W := 1428
 AERA_SCREEN_H := 2280
 AERA_STATUS_H := 114
 AERA_HIDE_NOTCH := 0

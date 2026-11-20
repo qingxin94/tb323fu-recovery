@@ -1,5 +1,5 @@
 diff --git a/Decrypt.cpp b/Decrypt.cpp
-index a02bad8..6906d89 100755
+index a02bad8..5a482e1 100755
 --- a/Decrypt.cpp
 +++ b/Decrypt.cpp
 @@ -26,6 +26,7 @@
@@ -29,29 +29,32 @@ index a02bad8..6906d89 100755
  		return Free_Return(retval, weaver_key, &pwd);
  	}
  
-@@ -1016,6 +1018,157 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
+@@ -1016,6 +1018,165 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
  	return 0;
  }
  
-+static userid_t Get_Tied_Profile_Parent(const userid_t user_id) {
++static bool Get_Tied_Profile_Parent(const userid_t user_id, userid_t* parent) {
++	if (parent == nullptr) return false;
 +	std::string user_xml;
 +	std::string path = "/data/system/users/" + std::to_string(user_id) + ".xml";
 +	if (!android::base::ReadFileToString(path, &user_xml)) {
 +		printf("Unable to read profile metadata for user %d\n", user_id);
-+		return 0;
++		return false;
 +	}
 +	const std::string attr = "profileGroupId=\"";
 +	size_t pos = user_xml.find(attr);
 +	if (pos == std::string::npos) {
-+		return 0;
++		return false;
 +	}
 +	pos += attr.size();
 +	char* end = nullptr;
-+	const long parent = strtol(user_xml.c_str() + pos, &end, 10);
-+	if (end == user_xml.c_str() + pos || parent < 0 || parent > 9999 || parent == user_id) {
-+		return 0;
++	const long parsed_parent = strtol(user_xml.c_str() + pos, &end, 10);
++	if (end == user_xml.c_str() + pos || parsed_parent < 0 || parsed_parent > 9999 ||
++		parsed_parent == user_id) {
++		return false;
 +	}
-+	return static_cast<userid_t>(parent);
++	*parent = static_cast<userid_t>(parsed_parent);
++	return true;
 +}
 +
 +struct TiedProfileRecord {
@@ -162,7 +165,12 @@ index a02bad8..6906d89 100755
 +		return 0;
 +	}
 +
-+	const userid_t parent = Get_Tied_Profile_Parent(user_id);
++	userid_t parent = 0;
++	if (!Get_Tied_Profile_Parent(user_id, &parent)) {
++		printf("User %d has a profile key but no valid profile parent; using normal unlock\n",
++			user_id);
++		return 0;
++	}
 +	printf("User %d has a tied profile lock (parent %d, file %s)\n",
 +		user_id, parent, record.path.c_str());
 +
@@ -187,20 +195,22 @@ index a02bad8..6906d89 100755
  extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
  	printf("Attempting to decrypt user\n");
      uint8_t *auth_token;
-@@ -1029,6 +1182,12 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1029,6 +1190,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
      std::string filename;
      bool Default_Password = (Password == "!");
 +    if (!Default_Password) {
-+        const int tied_result = Decrypt_Tied_Profile(user_id, Password);
-+        if (tied_result >= 0) {
-+            return tied_result == 1;
++        // Tie-profile unlock is additive only. Any failure here must fall
++        // through to the normal synthetic-password path; otherwise a broken
++        // TEE/Keystore chain would make ordinary owner decryption fail too.
++        if (Decrypt_Tied_Profile(user_id, Password) == 1) {
++            return true;
 +        }
 +    }
      if (Get_Password_Type(user_id, filename) == 0 && !Default_Password) {
  		printf("Unknown password type\n");
  		return false;
-@@ -1042,7 +1201,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1042,7 +1211,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
  	if (stat("/data/system_de/0/spblob", &st) == 0) {
  		printf("Using synthetic password method\n");
