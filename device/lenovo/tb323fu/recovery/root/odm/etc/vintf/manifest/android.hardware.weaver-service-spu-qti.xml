@@ -1,0 +1,11 @@
+<!--
+    TB323FU stock SPU Weaver service.  It registers IWeaver/default and is
+    started from init.recovery.qcom.rc after the SPU/mink modules are loaded.
+-->
+<manifest version="9.0" type="device">
+    <hal format="aidl">
+        <name>android.hardware.weaver</name>
+        <version>2</version>
+        <fqname>IWeaver/default</fqname>
+    </hal>
+</manifest>
