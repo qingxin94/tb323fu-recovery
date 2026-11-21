@@ -1,5 +1,5 @@
 diff --git a/Decrypt.cpp b/Decrypt.cpp
-index a02bad8..39d744a 100644
+index a02bad8..e73189b 100755
 --- a/Decrypt.cpp
 +++ b/Decrypt.cpp
 @@ -26,6 +26,7 @@
@@ -78,8 +78,44 @@ index a02bad8..39d744a 100644
  		// output_hex(weaver_data.data(), weaver_data.size());printf("\n");
  		const unsigned char* byteptr = (const unsigned char*)weaver_data.data();
  		wd->version = *byteptr;
-@@ -714,7 +749,8 @@ bool Decrypt_CE_storage(const userid_t user_id, const std::string& secret) {
+@@ -507,7 +542,8 @@ namespace keystore {
+ 	* https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#867
+ 	* returning an empty string indicates an error */
+ 	std::string unwrapSyntheticPasswordBlob(const std::string& spblob_path, const std::string& handle_str, const userid_t user_id,
+-		const void* application_id, const size_t application_id_size, uint32_t auth_token_len) {
++		const void* application_id, const size_t application_id_size, uint32_t auth_token_len,
++		std::string* raw_synthetic_password = nullptr, int* synthetic_password_version = nullptr) {
+ 		printf("Attempting to unwrap synthetic password blob\n");
+ 		std::string disk_decryption_secret_key = "";
  
+@@ -524,6 +560,7 @@ namespace keystore {
+ 			return disk_decryption_secret_key;
+ 		}
+ 		const unsigned char* synthetic_password_version = byteptr;
++		const int sp_version_value = *synthetic_password_version;
+ 		byteptr++;
+ 		if (*byteptr != SYNTHETIC_PASSWORD_PASSWORD_BASED) {
+ 			printf("spblob data is not SYNTHETIC_PASSWORD_PASSWORD_BASED\n");
+@@ -639,7 +676,12 @@ namespace keystore {
+ 			free(keystore_result);
+ 			int secret_key_real_size = actual_size - 16;
+ 			// printf("secret key:  "); output_hex((const unsigned char*)secret_key, secret_key_real_size); printf("\n");
+-			// The payload data from the keystore update is further personalized at https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#153
++			if (raw_synthetic_password) {
++				raw_synthetic_password->assign(reinterpret_cast<const char*>(secret_key), secret_key_real_size);
++			}
++			if (synthetic_password_version) {
++				*synthetic_password_version = sp_version_value;
++			}
+ 			// We now have the disk decryption key!
+ 			if (*synthetic_password_version == SYNTHETIC_PASSWORD_VERSION_V3) {
+ 				// V3 uses SP800 instead of SHA512
+@@ -712,9 +754,12 @@ bool Decrypt_CE_storage(const userid_t user_id, const std::string& secret) {
+ 	return true;
+ }
+ 
++static bool Add_SP_Gatekeeper_AuthToken(const userid_t user_id, const std::string& sp, int version);
++
  // /* Decrypt_User_Synth_Pass is the TWRP C++ equivalent to spBasedDoVerifyCredential
  //  * https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/LockSettingsService.java#1998 */
 -bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password) {
@@ -88,7 +124,7 @@ index a02bad8..39d744a 100644
  	printf("Attempting to decrypt user's synthetic password\n");
  	bool retval = false;
  	void* weaver_key = NULL;
-@@ -803,6 +839,10 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
+@@ -803,6 +848,10 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
  		// Called from https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#780
  		// The escrowed weaver key data is prefixed with "weaver-pwd" padded to 128 with nulls with the weaver payload appended then SHA512
  		void* weaver_secret = PersonalizedHashBinary(PERSONALISATION_WEAVER_PASSWORD, (const char*)weaver_payload.data(), weaver_payload.size());
@@ -99,19 +135,135 @@ index a02bad8..39d744a 100644
  		// printf("weaver secret: "); output_hex((unsigned char*)weaver_secret, SHA512_DIGEST_LENGTH); printf("\n");
  		// The application ID is the password token and weaver secret appended to each other
  		memcpy((void*)&application_id[0], (void*)&password_token[0], PASSWORD_TOKEN_SIZE);
-@@ -954,7 +994,7 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
+@@ -947,14 +996,21 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
+ 	// Now we will handle https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#816
+ 	// Plus we will include the last bit that computes the disk decrypt key found in:
+ 	// https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#153
+-	secret = android::keystore::unwrapSyntheticPasswordBlob(spblob_path, handle_str, user_id, (const void*)&application_id[0], 
+-		PASSWORD_TOKEN_SIZE + SHA512_DIGEST_LENGTH, auth_token_len);
++	std::string raw_sp;
++	int sp_version = 0;
++	secret = android::keystore::unwrapSyntheticPasswordBlob(spblob_path, handle_str, user_id, (const void*)&application_id[0],
++		PASSWORD_TOKEN_SIZE + SHA512_DIGEST_LENGTH, auth_token_len, &raw_sp, &sp_version);
+ 	if (!secret.size()) {
+ 		printf("failed to unwrapSyntheticPasswordBlob\n");
  		return Free_Return(retval, weaver_key, &pwd);
  	}
++	// Refresh the SID auth token exactly like AOSP's verifyChallenge().  This is
++	// required before a parent-SID-bound profile key can be used by Keystore.
++	if (!raw_sp.empty()) {
++		Add_SP_Gatekeeper_AuthToken(user_id, raw_sp, sp_version);
++	}
  
 -	if (!Decrypt_CE_storage(user_id, secret)) {
 +	if (unlock_storage && !Decrypt_CE_storage(user_id, secret)) {
  		return Free_Return(retval, weaver_key, &pwd);
  	}
  
-@@ -1016,6 +1056,187 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
+@@ -1016,6 +1072,287 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
  	return 0;
  }
  
++#define PERSONALIZATION_SP_GK_AUTH "sp-gk-authentication"
++
++static bool Add_Hardware_Auth_Token(const HardwareAuthToken& authToken) {
++	AIBinder* authzAIBinder = AServiceManager_waitForService("android.security.authorization");
++	if (authzAIBinder == nullptr) {
++		printf("Keystore authorization service is unavailable\n");
++		return false;
++	}
++	::ndk::SpAIBinder binder(authzAIBinder);
++	auto service = aidl::android::security::authorization::IKeystoreAuthorization::fromBinder(binder);
++	if (service == nullptr) {
++		printf("Unable to connect to keystore authorization service\n");
++		return false;
++	}
++	auto result = service->addAuthToken(authToken);
++	if (!result.isOk()) {
++		printf("Unable to add auth token to keystore: %s\n", result.getDescription().c_str());
++		return false;
++	}
++	return true;
++}
++
++// AOSP SyntheticPassword.deriveGkPassword(): v3 uses SP800-108 HMAC-SHA256,
++// v1/v2 use the legacy SHA-512 personalized hash.  The result must be raw bytes,
++// not the hex form that TWRP uses for the FBE key.
++static std::string Derive_SP_GK_Password(const std::string& sp, int version) {
++	if (version >= 3) {
++		std::string hex = PersonalizedHashSP800(PERSONALIZATION_SP_GK_AUTH,
++			PERSONALISATION_CONTEXT, sp.data(), sp.size());
++		if (hex.size() != 64) return "";
++		std::string raw;
++		raw.resize(32);
++		for (size_t i = 0; i < 32; ++i) {
++			auto nibble = [](char c) -> int {
++				if (c >= '0' && c <= '9') return c - '0';
++				if (c >= 'a' && c <= 'f') return c - 'a' + 10;
++				if (c >= 'A' && c <= 'F') return c - 'A' + 10;
++				return -1;
++			};
++			int hi = nibble(hex[i * 2]);
++			int lo = nibble(hex[i * 2 + 1]);
++			if (hi < 0 || lo < 0) return "";
++			raw[i] = static_cast<char>((hi << 4) | lo);
++		}
++		return raw;
++	}
++	void* digest = PersonalizedHashBinary(PERSONALIZATION_SP_GK_AUTH, sp.data(), sp.size());
++	if (digest == nullptr) return "";
++	std::string raw(reinterpret_cast<const char*>(digest), SHA512_DIGEST_LENGTH);
++	free(digest);
++	return raw;
++}
++
++// Equivalent to SyntheticPasswordManager.verifyChallenge(): verify the SP-derived
++// Gatekeeper password against the user's SP handle, then hand the resulting
++// HardwareAuthToken to Keystore.  Without this, a Weaver unlock never authorizes
++// the parent-SID-bound profile_key_name_decrypt_* keys.
++static bool Add_SP_Gatekeeper_AuthToken(const userid_t user_id, const std::string& sp, int version) {
++	std::string handle_path = "/data/system_de/" + std::to_string(user_id) +
++		"/spblob/0000000000000000.handle";
++	std::string sp_handle;
++	if (!android::base::ReadFileToString(handle_path, &sp_handle) || sp_handle.empty()) {
++		printf("SP Gatekeeper handle is unavailable for user %d\n", user_id);
++		return false;
++	}
++	const std::string gk_password = Derive_SP_GK_Password(sp, version);
++	if (gk_password.empty()) {
++		printf("Unable to derive SP Gatekeeper password for user %d\n", user_id);
++		return false;
++	}
++
++	::ndk::SpAIBinder binder(AServiceManager_waitForService(
++		"android.hardware.gatekeeper.IGatekeeper/default"));
++	auto gatekeeper = AidlIGatekeeper::fromBinder(binder);
++	if (gatekeeper == nullptr) {
++		printf("AIDL Gatekeeper service is unavailable\n");
++		return false;
++	}
++	android::hardware::hidl_vec<uint8_t> handle_hidl;
++	handle_hidl.setToExternal(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(sp_handle.data())),
++		sp_handle.size());
++	android::hardware::hidl_vec<uint8_t> password_hidl;
++	password_hidl.setToExternal(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(gk_password.data())),
++		gk_password.size());
++	AidlGatekeeperVerifyResp response;
++	auto result = gatekeeper->verify(fakeUid(user_id), 0 /* challenge */, handle_hidl,
++		password_hidl, &response);
++	if (!result.isOk() || response.statusCode < AidlIGatekeeper::STATUS_OK) {
++		printf("SP Gatekeeper verification failed for user %d (status %d)\n",
++			user_id, response.statusCode);
++		return false;
++	}
++	if (!Add_Hardware_Auth_Token(response.hardwareAuthToken)) {
++		printf("Unable to add SP auth token for user %d\n", user_id);
++		return false;
++	}
++	printf("SP Gatekeeper auth token added for user %d\n", user_id);
++	return true;
++}
++
 +static bool Get_Tied_Profile_Parent(const userid_t user_id, userid_t* parent) {
 +	if (parent == nullptr) return false;
 +	std::string user_xml;
@@ -296,7 +448,7 @@ index a02bad8..39d744a 100644
  extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
  	printf("Attempting to decrypt user\n");
      uint8_t *auth_token;
-@@ -1029,6 +1250,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1029,6 +1366,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
      std::string filename;
      bool Default_Password = (Password == "!");
@@ -311,7 +463,7 @@ index a02bad8..39d744a 100644
      if (Get_Password_Type(user_id, filename) == 0 && !Default_Password) {
  		printf("Unknown password type\n");
  		return false;
-@@ -1042,7 +1271,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1042,7 +1387,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
  	if (stat("/data/system_de/0/spblob", &st) == 0) {
  		printf("Using synthetic password method\n");
