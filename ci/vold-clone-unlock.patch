@@ -1,5 +1,5 @@
 diff --git a/Decrypt.cpp b/Decrypt.cpp
-index a02bad8..fd94efd 100755
+index a02bad8..8bdb65c 100755
 --- a/Decrypt.cpp
 +++ b/Decrypt.cpp
 @@ -26,6 +26,7 @@
@@ -160,7 +160,7 @@ index a02bad8..fd94efd 100755
  		return Free_Return(retval, weaver_key, &pwd);
  	}
  
-@@ -1016,6 +1072,287 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
+@@ -1016,6 +1072,290 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
  	return 0;
  }
  
@@ -249,7 +249,10 @@ index a02bad8..fd94efd 100755
 +	password_hidl.setToExternal(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(gk_password.data())),
 +		gk_password.size());
 +	AidlGatekeeperVerifyResp response;
-+	auto result = gatekeeper->verify(fakeUid(user_id), 0 /* challenge */, handle_hidl,
++	// The 0000000000000000.handle blob is the SP handle enrolled by
++	// SyntheticPasswordManager.newSidForUser(), which uses the real Android
++	// user id (not the legacy fakeUid credential path).
++	auto result = gatekeeper->verify(user_id, 0 /* challenge */, handle_hidl,
 +		password_hidl, &response);
 +	if (!result.isOk() || response.statusCode < AidlIGatekeeper::STATUS_OK) {
 +		printf("SP Gatekeeper verification failed for user %d (status %d)\n",
@@ -448,7 +451,7 @@ index a02bad8..fd94efd 100755
  extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
  	printf("Attempting to decrypt user\n");
      uint8_t *auth_token;
-@@ -1029,6 +1366,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1029,6 +1369,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
      std::string filename;
      bool Default_Password = (Password == "!");
@@ -463,7 +466,7 @@ index a02bad8..fd94efd 100755
      if (Get_Password_Type(user_id, filename) == 0 && !Default_Password) {
  		printf("Unknown password type\n");
  		return false;
-@@ -1042,7 +1387,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1042,7 +1390,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
  	if (stat("/data/system_de/0/spblob", &st) == 0) {
  		printf("Using synthetic password method\n");
