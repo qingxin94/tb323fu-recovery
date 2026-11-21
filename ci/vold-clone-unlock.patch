@@ -1,5 +1,5 @@
 diff --git a/Decrypt.cpp b/Decrypt.cpp
-index a02bad8..e73189b 100755
+index a02bad8..fd94efd 100755
 --- a/Decrypt.cpp
 +++ b/Decrypt.cpp
 @@ -26,6 +26,7 @@
@@ -84,7 +84,7 @@ index a02bad8..e73189b 100755
  	std::string unwrapSyntheticPasswordBlob(const std::string& spblob_path, const std::string& handle_str, const userid_t user_id,
 -		const void* application_id, const size_t application_id_size, uint32_t auth_token_len) {
 +		const void* application_id, const size_t application_id_size, uint32_t auth_token_len,
-+		std::string* raw_synthetic_password = nullptr, int* synthetic_password_version = nullptr) {
++		std::string* raw_synthetic_password = nullptr, int* sp_version_out = nullptr) {
  		printf("Attempting to unwrap synthetic password blob\n");
  		std::string disk_decryption_secret_key = "";
  
@@ -104,8 +104,8 @@ index a02bad8..e73189b 100755
 +			if (raw_synthetic_password) {
 +				raw_synthetic_password->assign(reinterpret_cast<const char*>(secret_key), secret_key_real_size);
 +			}
-+			if (synthetic_password_version) {
-+				*synthetic_password_version = sp_version_value;
++			if (sp_version_out) {
++				*sp_version_out = sp_version_value;
 +			}
  			// We now have the disk decryption key!
  			if (*synthetic_password_version == SYNTHETIC_PASSWORD_VERSION_V3) {
