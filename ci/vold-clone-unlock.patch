@@ -1,5 +1,5 @@
 diff --git a/Decrypt.cpp b/Decrypt.cpp
-index a02bad8..8bdb65c 100755
+index a02bad8..5186d96 100755
 --- a/Decrypt.cpp
 +++ b/Decrypt.cpp
 @@ -26,6 +26,7 @@
@@ -160,7 +160,7 @@ index a02bad8..8bdb65c 100755
  		return Free_Return(retval, weaver_key, &pwd);
  	}
  
-@@ -1016,6 +1072,290 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
+@@ -1016,6 +1072,358 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename)
  	return 0;
  }
  
@@ -318,6 +318,53 @@ index a02bad8..8bdb65c 100755
 +	std::string alias;
 +};
 +
++// Owner 0 is expensive to verify: each verification goes through Weaver/
++// Gatekeeper and writes a fresh auth token into Keystore.  A batch scope lets
++// the recovery clone loop verify owner 0 once, then reuse that token for
++// 900-999.  Decrypt_User() outside this scope keeps its old single-user
++// behavior.
++struct AppCloneBatch {
++	bool active = false;
++	userid_t parent = 0;
++	std::string password;
++	bool parent_verified = false;
++};
++
++static AppCloneBatch g_app_clone_batch;
++
++extern "C" void Begin_App_Clone_Batch(const char* Password) {
++	g_app_clone_batch.active = false;
++	g_app_clone_batch.parent_verified = false;
++	g_app_clone_batch.parent = 0;
++	g_app_clone_batch.password.clear();
++
++	if (Password == nullptr || Password[0] == '\0' ||
++		strcmp(Password, "!") == 0)
++		return;
++
++	// The caller must invoke this immediately after Decrypt_User(0) succeeded.
++	// That call already refreshed owner 0's Gatekeeper auth token, so the
++	// clone batch must not verify owner 0 a second time.
++	g_app_clone_batch.parent = 0;
++	g_app_clone_batch.password = Password;
++	g_app_clone_batch.parent_verified = true;
++	g_app_clone_batch.active = true;
++	printf("App clone batch: reusing owner 0 auth token\n");
++}
++
++extern "C" void End_App_Clone_Batch() {
++	g_app_clone_batch.active = false;
++	g_app_clone_batch.parent_verified = false;
++	g_app_clone_batch.parent = 0;
++	g_app_clone_batch.password.clear();
++}
++
++static bool App_Clone_Batch_Matches(userid_t parent, const std::string& Password) {
++	return g_app_clone_batch.active &&
++		g_app_clone_batch.parent == parent &&
++		g_app_clone_batch.password == Password;
++}
++
 +static bool Get_Tied_Profile_Record(const userid_t user_id, TiedProfileRecord* record) {
 +	if (record == nullptr) return false;
 +	const std::string aosp = "/data/system/users/" + std::to_string(user_id) +
@@ -430,14 +477,35 @@ index a02bad8..8bdb65c 100755
 +	printf("User %d has a tied profile lock (parent %d, file %s)\n",
 +		user_id, parent, record.path.c_str());
 +
-+	if (!Decrypt_User_Synth_Pass(parent, Password, false)) {
-+		printf("Unable to verify parent user %d credential for tied profile %d\n",
++	bool parent_verified = false;
++	if (App_Clone_Batch_Matches(parent, Password) &&
++		g_app_clone_batch.parent_verified) {
++		parent_verified = true;
++		printf("Parent user %d credential reused from clone batch for tied profile %d\n",
 +			parent, user_id);
-+		return -1;
 +	}
-+	printf("Parent user %d credential verified for tied profile %d\n", parent, user_id);
++	if (!parent_verified) {
++		if (!Decrypt_User_Synth_Pass(parent, Password, false)) {
++			printf("Unable to verify parent user %d credential for tied profile %d\n",
++				parent, user_id);
++			return -1;
++		}
++		if (App_Clone_Batch_Matches(parent, Password))
++			g_app_clone_batch.parent_verified = true;
++		printf("Parent user %d credential verified for tied profile %d\n", parent, user_id);
++	}
 +
 +	std::string profile_password = Decrypt_Tied_Profile_Key(record);
++	if (profile_password.empty() && App_Clone_Batch_Matches(parent, Password)) {
++		// A profile key can fail if the owner token expired between clones.
++		// Retry this clone once with a fresh owner token, not once per clone
++		// unconditionally.
++		printf("Retrying owner %d auth token for tied profile %d\n", parent, user_id);
++		if (Decrypt_User_Synth_Pass(parent, Password, false)) {
++			g_app_clone_batch.parent_verified = true;
++			profile_password = Decrypt_Tied_Profile_Key(record);
++		}
++	}
 +	if (!profile_password.empty() &&
 +		Decrypt_User_Synth_Pass(user_id, profile_password)) {
 +		printf("Tied profile user %d unlocked with its profile credential\n", user_id);
@@ -451,7 +519,7 @@ index a02bad8..8bdb65c 100755
  extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
  	printf("Attempting to decrypt user\n");
      uint8_t *auth_token;
-@@ -1029,6 +1369,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1029,6 +1437,14 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
      std::string filename;
      bool Default_Password = (Password == "!");
@@ -466,7 +534,7 @@ index a02bad8..8bdb65c 100755
      if (Get_Password_Type(user_id, filename) == 0 && !Default_Password) {
  		printf("Unknown password type\n");
  		return false;
-@@ -1042,7 +1390,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
+@@ -1042,7 +1458,10 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
  	}
  	if (stat("/data/system_de/0/spblob", &st) == 0) {
  		printf("Using synthetic password method\n");
@@ -478,6 +546,19 @@ index a02bad8..8bdb65c 100755
  	}
  	// printf("password filename is '%s'\n", filename.c_str());
  	if (stat(filename.c_str(), &st) != 0) {
+diff --git a/Decrypt.h b/Decrypt.h
+index ff926dc..7dd4a6c 100755
+--- a/Decrypt.h
++++ b/Decrypt.h
+@@ -38,6 +38,8 @@ namespace keystore {
+     int Get_Password_Type(const userid_t user_id, std::string& filename);
+     bool Decrypt_DE();
+     bool Decrypt_User(const userid_t user_id, const std::string& Password);
++    void Begin_App_Clone_Batch(const char* Password);
++    void End_App_Clone_Batch();
+ }
+ }
+ __END_DECLS
 diff --git a/Weaver1.cpp b/Weaver1.cpp
 index a2eeaaa..68bc0df 100644
 --- a/Weaver1.cpp
