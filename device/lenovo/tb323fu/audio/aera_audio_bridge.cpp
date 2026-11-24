@@ -43,6 +43,8 @@ constexpr uint32_t kChannels = 2U;
 constexpr uint32_t kBits = 16U;
 constexpr char kSocketName[] = "aera-browser-audio-v1";
 constexpr int kDefaultVolume = 60;
+constexpr int kAudioReadyTimeoutMs = 45000;
+constexpr int kAudioReadyPollMs = 250;
 
 volatile sig_atomic_t g_stop = 0;
 
@@ -58,6 +60,45 @@ std::string Property(const char* key, const char* fallback) {
   if (__system_property_get(key, value) > 0 && value[0] != '\0')
     return std::string(value);
   return std::string(fallback);
+}
+
+bool AudioReady() {
+  return Property("aera.audio.loaded", "") == "true" &&
+         Property("aera.audio.ready", "") == "1" &&
+         Property("init.svc.aera-agm-service", "") == "running";
+}
+
+bool EnsureAudioReady() {
+  if (AudioReady()) return true;
+
+  const bool modules_loaded = Property("aera.audio.loaded", "") == "true";
+  bool bootstrap_kicked = modules_loaded;
+  if (modules_loaded) {
+    Log("audio modules loaded but AGM/PAL host is not running; "
+        "starting bootstrap");
+    __system_property_set("ctl.start", "aera-audio-bootstrap");
+  } else {
+    Log("audio group is not ready; triggering on-demand load");
+    __system_property_set("sys.aera.audio.load", "1");
+  }
+
+  for (int elapsed = 0; elapsed < kAudioReadyTimeoutMs;
+       elapsed += kAudioReadyPollMs) {
+    if (AudioReady()) {
+      Log("audio group ready");
+      return true;
+    }
+    if (!bootstrap_kicked &&
+        Property("aera.audio.loaded", "") == "true" &&
+        Property("init.svc.aera-agm-service", "") != "running") {
+      __system_property_set("ctl.start", "aera-audio-bootstrap");
+      bootstrap_kicked = true;
+      Log("audio modules loaded; starting bootstrap");
+    }
+    usleep(kAudioReadyPollMs * 1000);
+  }
+  Log("audio group did not become ready before timeout");
+  return false;
 }
 
 bool WriteAll(int fd, const void* data, size_t size) {
@@ -203,6 +244,11 @@ void ServeClient(int client) {
     return;
   }
 
+  if (!EnsureAudioReady()) {
+    Log("audio output is not ready; closing stream");
+    return;
+  }
+
   const std::string player = FindAgmPlay();
   if (player.empty()) {
     Log("stock agmplay is not mounted; audio unavailable");
@@ -300,6 +346,7 @@ int main(int argc, char** argv) {
   }
 
   Log("browser PCM bridge ready");
+  EnsureAudioReady();
   while (!g_stop) {
     const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
     if (client < 0) {
