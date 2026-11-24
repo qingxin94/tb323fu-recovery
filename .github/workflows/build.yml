@@ -121,6 +121,14 @@ jobs:
         find /mnt/work -name .git -type d -prune -exec rm -rf {} + 2>/dev/null || true
         df -h /
 
+    - name: Allow 16.0.0 in CTS platform releases
+      run: |
+        FILE=/mnt/work/cts/tests/tests/os/assets/platform_releases.txt
+        test -f "$FILE"
+        grep -qxF '16.0.0' "$FILE" || sed -i '$a 16.0.0' "$FILE"
+        grep -qxF '16.0.0' "$FILE"
+        tail -3 "$FILE"
+
     - name: Copy device tree
       run: |
         mkdir -p /mnt/work/device/lenovo/tb323fu
