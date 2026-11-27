@@ -5,12 +5,13 @@
  *
  * AERA's artillery/browser client opens the abstract Unix socket
  * "aera-browser-audio-v1", sends a 48 kHz / stereo / 16-bit hello, then streams
- * 20 ms PCM frames.  This bridge validates the peer UID, writes a WAV header to
- * a private FIFO, and asks the installed stock agmplay binary to consume that
- * FIFO through the AGM/PAL services registered by aera-audio-service.
+ * 20 ms PCM frames.  This bridge validates the peer UID and forwards raw PCM
+ * to the dedicated stock-PAL player in a separate process.  It deliberately
+ * does not gate playback on a "ready" property: a registration warning must
+ * never stop the PCM path.
  *
- * The bridge itself carries no vendor library and no kernel module.  It only
- * executes the stock agmplay from the mounted vendor partition.
+ * The bridge itself carries no vendor library and no kernel module.  The PAL
+ * player is the only process that loads libar-pal.so.
  */
 #include <android/log.h>
 #include <algorithm>
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <string>
 #include <sys/prctl.h>
@@ -43,10 +45,19 @@ constexpr uint32_t kChannels = 2U;
 constexpr uint32_t kBits = 16U;
 constexpr char kSocketName[] = "aera-browser-audio-v1";
 constexpr int kDefaultVolume = 60;
-constexpr int kAudioReadyTimeoutMs = 45000;
-constexpr int kAudioReadyPollMs = 250;
+constexpr char kPalPlayer[] = "/system/bin/aera-palplayer";
+constexpr char kPersistentFifo[] = "/tmp/aera-browser-audio.fifo";
 
 volatile sig_atomic_t g_stop = 0;
+
+/* AERA Media opens a new PCM client for every track.  PAL on TB323FU has a
+ * small fixed number of low-latency streams and does not reliably reclaim a
+ * client stream when aera-palplayer exits without pal_stream_stop().  Keeping
+ * one player and one FIFO for the bridge lifetime means the stock PAL stream
+ * is opened once per boot instead of once per video, so the fourth track does
+ * not run out of PAL stream slots and stall the playbin clock. */
+int g_output = -1;
+pid_t g_player = -1;
 
 void Stop(int) { g_stop = 1; }
 
@@ -62,53 +73,57 @@ std::string Property(const char* key, const char* fallback) {
   return std::string(fallback);
 }
 
-bool AudioReady() {
-  return Property("aera.audio.loaded", "") == "true" &&
-         Property("aera.audio.ready", "") == "1" &&
-         Property("init.svc.aera-agm-service", "") == "running";
-}
-
-bool EnsureAudioReady() {
-  if (AudioReady()) return true;
-
-  const bool modules_loaded = Property("aera.audio.loaded", "") == "true";
-  bool bootstrap_kicked = modules_loaded;
-  if (modules_loaded) {
-    Log("audio modules loaded but AGM/PAL host is not running; "
-        "starting bootstrap");
+/* Start the one-shot audio bring-up if it has not run.  This is deliberately
+ * not a readiness gate: the client is never rejected for a missing property. */
+void KickAudioHost() {
+  if (Property("aera.audio.loaded", "") == "true") {
     __system_property_set("ctl.start", "aera-audio-bootstrap");
   } else {
-    Log("audio group is not ready; triggering on-demand load");
     __system_property_set("sys.aera.audio.load", "1");
   }
-
-  for (int elapsed = 0; elapsed < kAudioReadyTimeoutMs;
-       elapsed += kAudioReadyPollMs) {
-    if (AudioReady()) {
-      Log("audio group ready");
-      return true;
-    }
-    if (!bootstrap_kicked &&
-        Property("aera.audio.loaded", "") == "true" &&
-        Property("init.svc.aera-agm-service", "") != "running") {
-      __system_property_set("ctl.start", "aera-audio-bootstrap");
-      bootstrap_kicked = true;
-      Log("audio modules loaded; starting bootstrap");
-    }
-    usleep(kAudioReadyPollMs * 1000);
-  }
-  Log("audio group did not become ready before timeout");
-  return false;
 }
 
-bool WriteAll(int fd, const void* data, size_t size) {
+bool WriteAll(int fd, int client, const void* data, size_t size) {
   const auto* bytes = static_cast<const uint8_t*>(data);
   size_t done = 0;
+  unsigned stalled_polls = 0;
   while (done < size) {
     const ssize_t count = write(fd, bytes + done, size - done);
+    if (count > 0) {
+      done += static_cast<size_t>(count);
+      stalled_polls = 0;
+      continue;
+    }
     if (count < 0 && errno == EINTR) continue;
-    if (count <= 0) return false;
-    done += static_cast<size_t>(count);
+    if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      /* Wait for FIFO room, but also watch the client socket.  A media
+       * session that exits mid-track must not leave the single-client
+       * server stuck until the stall timeout: detect its HUP/EOF here and
+       * release the PAL player immediately for the next session. */
+      struct pollfd fds[2] = {
+          {.fd = fd, .events = POLLOUT, .revents = 0},
+          {.fd = client, .events = POLLIN, .revents = 0},
+      };
+      const int ready = poll(fds, 2, 50);
+      if (ready > 0) {
+        if (fds[1].revents & (POLLHUP | POLLERR | POLLNVAL)) return false;
+        if (fds[1].revents & POLLIN) {
+          char probe;
+          const ssize_t peek = recv(client, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
+          if (peek == 0 || (peek < 0 && errno != EAGAIN && errno != EWOULDBLOCK))
+            return false;
+        }
+        if (fds[0].revents & POLLOUT &&
+            !(fds[0].revents & (POLLERR | POLLHUP | POLLNVAL))) {
+          stalled_polls = 0;
+          continue;
+        }
+        if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) return false;
+      }
+      if (++stalled_polls >= 100) return false;
+      continue;
+    }
+    return false;
   }
   return true;
 }
@@ -135,75 +150,17 @@ int ReadVolume() {
   return std::clamp(atoi(value), 0, 100);
 }
 
-std::string FindAgmPlay() {
-  const std::string configured = Property("aera.audio.player", "");
-  if (!configured.empty() && access(configured.c_str(), X_OK) == 0)
-    return configured;
-  const std::vector<std::string> candidates = {
-      "/mnt/aera-stock/vendor/bin/agmplay",
-      "/vendor/bin/agmplay",
-  };
-  for (const auto& candidate : candidates) {
-    if (access(candidate.c_str(), X_OK) == 0) return candidate;
-  }
-  return std::string();
-}
-
-std::array<uint8_t, 44> WavHeader() {
-  std::array<uint8_t, 44> header{};
-  auto put16 = [&header](size_t offset, uint16_t value) {
-    header[offset] = static_cast<uint8_t>(value);
-    header[offset + 1] = static_cast<uint8_t>(value >> 8);
-  };
-  auto put32 = [&header](size_t offset, uint32_t value) {
-    for (size_t i = 0; i < 4; ++i)
-      header[offset + i] = static_cast<uint8_t>(value >> (8 * i));
-  };
-  memcpy(header.data(), "RIFF", 4);
-  put32(4, 0x7ffff024U);
-  memcpy(header.data() + 8, "WAVEfmt ", 8);
-  put32(16, 16U);
-  put16(20, 1U);
-  put16(22, static_cast<uint16_t>(kChannels));
-  put32(24, kRate);
-  put32(28, kRate * kChannels * (kBits / 8));
-  put16(32, static_cast<uint16_t>(kChannels * (kBits / 8)));
-  put16(34, static_cast<uint16_t>(kBits));
-  memcpy(header.data() + 36, "data", 4);
-  put32(40, 0x7ffff000U);
-  return header;
-}
-
-pid_t StartPlayer(const std::string& player, const std::string& fifo) {
-  const std::string card = Property("aera.audio.card", "100");
-  const std::string device = Property("aera.audio.device", "100");
-  const std::string interface = Property("aera.audio.interface", "");
-  /* TB323FU's stock agmplay usage is:
-   *   agmplay file.wav [-D card] [-d device] [-num_intf N iface...]
-   * It takes PCM format from the WAV header, so -c/-r/-b are not valid
-   * options on this device and must not be passed. */
-  std::vector<std::string> arguments = {
-      player, fifo, "-D", card, "-d", device,
-  };
-  if (!interface.empty()) {
-    arguments.push_back("-num_intf");
-    arguments.push_back("1");
-    arguments.push_back(interface);
-  }
-
+pid_t StartPlayer(const std::string& fifo) {
   const pid_t child = fork();
   if (child != 0) return child;
   prctl(PR_SET_PDEATHSIG, SIGTERM, 0, 0, 0);
   setenv("LD_LIBRARY_PATH",
-         "/mnt/aera-stock/vendor/lib64:/vendor/lib64:/system/lib64", 1);
+         "/mnt/aera-stock/vendor/lib64:/tmp/aera-audio-abi:/vendor/lib64:/system/lib64", 1);
   setenv("ANDROID_ROOT", "/system", 1);
   setenv("ANDROID_DATA", "/data", 1);
-
-  std::vector<char*> argv;
-  argv.reserve(arguments.size() + 1);
-  for (auto& argument : arguments) argv.push_back(argument.data());
-  argv.push_back(nullptr);
-  execv(player.c_str(), argv.data());
+  setenv("AERA_PAL_STREAM_TYPE", "1", 1);
+  execl(kPalPlayer, "aera-palplayer", "--fifo", fifo.c_str(),
+        "--stream-type", "1", nullptr);
   _exit(127);
 }
 
@@ -244,44 +201,52 @@ void ServeClient(int client) {
     return;
   }
 
-  if (!EnsureAudioReady()) {
-    Log("audio output is not ready; closing stream");
-    return;
+  KickAudioHost();
+
+  /* Keep the FIFO and PAL player across client sessions.  The player blocks
+   * in read() when no session is active; its PAL stream stays open. */
+  if (g_player > 0) {
+    int status = 0;
+    if (waitpid(g_player, &status, WNOHANG) == g_player) {
+      if (g_output >= 0) close(g_output);
+      g_output = -1;
+      g_player = -1;
+      unlink(kPersistentFifo);
+    }
+  }
+  if (g_output < 0) {
+    if (g_player < 0) {
+      unlink(kPersistentFifo);
+      if (mkfifo(kPersistentFifo, 0600) != 0) {
+        Log("could not create audio FIFO");
+        return;
+      }
+      g_player = StartPlayer(kPersistentFifo);
+      if (g_player < 0) {
+        unlink(kPersistentFifo);
+        Log("could not start aera-palplayer");
+        return;
+      }
+    }
+    /* Write-only non-blocking open fails with ENXIO until the reader exists. */
+    for (int attempt = 0; attempt < 100 && g_output < 0; ++attempt) {
+      g_output = open(kPersistentFifo, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+      if (g_output >= 0) break;
+      if (errno != ENXIO && errno != EINTR) break;
+      usleep(50000);
+    }
+    if (g_output < 0) {
+      StopPlayer(g_player);
+      g_player = -1;
+      unlink(kPersistentFifo);
+      Log("could not open audio FIFO");
+      return;
+    }
   }
 
-  const std::string player = FindAgmPlay();
-  if (player.empty()) {
-    Log("stock agmplay is not mounted; audio unavailable");
-    return;
-  }
-
-  const std::string fifo =
-      "/tmp/aera-browser-audio-" +
-      std::to_string(static_cast<long long>(getpid()));
-  unlink(fifo.c_str());
-  if (mkfifo(fifo.c_str(), 0600) != 0) {
-    Log("could not create audio FIFO");
-    return;
-  }
-  const int output = open(fifo.c_str(), O_RDWR | O_CLOEXEC);
-  if (output < 0) {
-    unlink(fifo.c_str());
-    Log("could not open audio FIFO");
-    return;
-  }
-
-  const pid_t audio_player = StartPlayer(player, fifo);
-  if (audio_player < 0) {
-    close(output);
-    unlink(fifo.c_str());
-    Log("could not start agmplay");
-    return;
-  }
-
-  const auto header = WavHeader();
-  bool good = WriteAll(output, header.data(), header.size());
+  bool good = true;
   int volume = ReadVolume();
-  std::array<uint8_t, 8193> buffer{};
+  std::array<uint8_t, 8195> buffer{};
   size_t carry = 0;
   unsigned volume_counter = 0;
 
@@ -297,20 +262,19 @@ void ServeClient(int client) {
       int16_t sample = static_cast<int16_t>(
           static_cast<uint16_t>(buffer[offset]) |
           (static_cast<uint16_t>(buffer[offset + 1]) << 8));
-      sample = static_cast<int16_t>((static_cast<int32_t>(sample) * volume) /
-                                    100);
+      sample = static_cast<int16_t>(
+          (static_cast<int32_t>(sample) * volume * volume) / 10000);
       buffer[offset] = static_cast<uint8_t>(sample);
       buffer[offset + 1] = static_cast<uint8_t>(
           static_cast<uint16_t>(sample) >> 8);
     }
-    good = WriteAll(output, buffer.data(), even);
+    good = WriteAll(g_output, client, buffer.data(), even);
     carry = total - even;
     if (carry) buffer[0] = buffer[even];
   }
 
-  close(output);
-  StopPlayer(audio_player);
-  unlink(fifo.c_str());
+  /* Do not close the writer or stop the PAL player here.  The next media
+   * session reuses the same open PAL stream instead of allocating another. */
 }
 }  // namespace
 
@@ -346,7 +310,7 @@ int main(int argc, char** argv) {
   }
 
   Log("browser PCM bridge ready");
-  EnsureAudioReady();
+  KickAudioHost();
   while (!g_stop) {
     const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
     if (client < 0) {
@@ -357,5 +321,10 @@ int main(int argc, char** argv) {
     close(client);
   }
   close(server);
+  if (g_output >= 0) close(g_output);
+  g_output = -1;
+  StopPlayer(g_player);
+  g_player = -1;
+  unlink(kPersistentFifo);
   return 0;
 }

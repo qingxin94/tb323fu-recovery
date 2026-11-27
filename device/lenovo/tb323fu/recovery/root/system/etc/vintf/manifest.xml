@@ -17,4 +17,12 @@
         <version>1</version>
         <fqname>ISupplicantVendor/default</fqname>
     </hal>
+    <hal format="aidl">
+        <name>vendor.qti.hardware.agm</name>
+        <fqname>IAGM/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>vendor.qti.hardware.pal</name>
+        <fqname>IPAL/default</fqname>
+    </hal>
 </manifest>

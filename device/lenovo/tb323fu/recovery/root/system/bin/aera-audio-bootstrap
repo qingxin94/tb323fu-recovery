@@ -12,6 +12,8 @@ set -u
 
 PATH=/system/bin:/sbin
 export PATH
+# Recovery audio runs permissive; this is a route borrowed from the reference, not its files.
+setenforce 0 2>/dev/null || echo 0 > /sys/fs/selinux/enforce 2>/dev/null || true
 stock_root=/mnt/aera-stock
 vendor_root=${stock_root}/vendor
 slot_suffix="$(getprop ro.boot.slot_suffix)"
@@ -116,7 +118,14 @@ if ! is_mounted /firmware; then
     mount -t vfat -o ro "${modem_partition}" /firmware || \
         fail "could not mount stock modem firmware"
 fi
-bind_dir /firmware /vendor/firmware_mnt
+# Stock TB323FU places ADSP images under /firmware/image; keep the real
+# firmware partition mounted at /firmware and expose the image subdirectory.
+if is_mounted /vendor/firmware_mnt; then
+    [ -e /vendor/firmware_mnt/image/adsp.mdt ] || umount /vendor/firmware_mnt 2>/dev/null || true
+fi
+if ! is_mounted /vendor/firmware_mnt; then
+    bind_dir /firmware /vendor/firmware_mnt
+fi
 
 # If /vendor is the rootfs overlay, expose only the stock audio directories and
 # files; never overlay the whole /vendor tree.
@@ -133,15 +142,49 @@ fi
 mkdir -p /data/vendor/audio/acdbdata/delta /data/vendor/audio_dsp \
     /vendor/etc/seccomp_policy 2>/dev/null || true
 
+# Do NOT bind the modem image over /lib/firmware: aera-stock-mount.sh has
+# already put the real /vendor/firmware there (novatek touch, aw882xx amp,
+# WLAN).  Build a separate symlink-only firmware view instead.  No stock
+# directory mode/owner/context is changed.
+# ADSP firmware is already a real directory in the stock modem image.
+# Use it directly.  The previous /tmp symlink and /tmp bind paths both made
+# the kernel firmware loader return -EACCES for adsp.b10..b52.  The vendor
+# path is the same path stock Android uses; after ADSP is up, restore the
+# previous firmware_class.path (usually the WiFi path) untouched.
+setup_adsp_firmware() {
+    old_fw_path="$(cat /sys/module/firmware_class/parameters/path 2>/dev/null)"
+    [ -n "${old_fw_path}" ] || old_fw_path=/lib/firmware
+    if [ -w /sys/module/firmware_class/parameters/path ]; then
+        echo /vendor/firmware_mnt/image > /sys/module/firmware_class/parameters/path 2>/dev/null \
+            && log_line "ADSP firmware path=/vendor/firmware_mnt/image (stock real dir)"
+    else
+        log_line "WARN firmware_class.path not writable"
+    fi
+    return 0
+}
+
+
+restore_firmware_path() {
+    if [ -w /sys/module/firmware_class/parameters/path ]; then
+        echo "${old_fw_path:-/lib/firmware}" > /sys/module/firmware_class/parameters/path 2>/dev/null \
+            && log_line "firmware path restored to ${old_fw_path:-/lib/firmware}"
+    fi
+    return 0
+}
+
+
 start_adsp() {
     adsp=""
     for candidate in /sys/class/remoteproc/remoteproc*; do
         [ -e "${candidate}/name" ] || continue
         case "$(cat "${candidate}/name" 2>/dev/null)" in
-            *adsp*) adsp="${candidate}" ;;
+            *remoteproc-adsp*|*adsp*) adsp="${candidate}" ;;
         esac
     done
     [ -n "${adsp}" ] || fail "ADSP remoteproc not found"
+    # Do not stop a healthy ADSP here.  The stock recovery kernel boots it
+    # before userspace; stopping it from this script made the later SSR write
+    # block indefinitely on TB323FU.  Only start it if it is down.
     if [ "$(cat "${adsp}/state" 2>/dev/null)" != running ]; then
         echo start > "${adsp}/state" 2>/dev/null || fail "could not start ADSP"
     fi
@@ -151,6 +194,141 @@ start_adsp() {
         [ "${attempt}" -ge 100 ] && fail "ADSP did not reach running"
         sleep 0.1
     done
+}
+
+# The recovery system NDK is an AOSP recovery build, not the stock A16 one.
+# Stock A16 libagmipcservice/libpalipcservice/libar-pal were built against the
+# stock A16 libbinder_ndk; mixing the recovery NDK gives a second binder copy.
+# Ship the exact stock A16 NDK in the ramdisk and put it first in /tmp.
+# Do NOT put system libbinder.so in front of /vendor: stock AGM/PAL must use
+# /vendor/lib64/libbinder.so, the vendor binder domain.
+prepare_audio_abi() {
+    abi=/tmp/aera-audio-abi
+    rm -rf "$abi" 2>/dev/null || true
+    mkdir -p "$abi" 2>/dev/null || return 0
+    stock_ndk=/system/lib64/aera-a16-libbinder_ndk.so
+    if [ ! -f "${stock_ndk}" ]; then
+        fail "stock A16 libbinder_ndk missing; refusing to mix recovery NDK"
+    fi
+    ln -sfn "${stock_ndk}" "${abi}/libbinder_ndk.so" 2>/dev/null || \
+        fail "could not link stock A16 libbinder_ndk"
+    log_line "audio ABI path=${abi} (vendor libbinder + stock A16 libbinder_ndk)"
+    return 0
+}
+
+load_machine_driver() {
+    mod=/vendor_dlkm/lib/modules/machine_dlkm.ko
+    if grep -q '^machine_dlkm ' /proc/modules 2>/dev/null; then
+        # Do not rmmod/reload: machine_dlkm has already created
+        # /sys/kernel/snd_card and a reload fails with duplicate kobject.
+        log_line "machine_dlkm already loaded; using deferred probe"
+        return 0
+    fi
+    [ -f "${mod}" ] || { log_line "machine_dlkm.ko not found: ${mod}"; return 1; }
+    insmod "${mod}" >> "${log}" 2>&1
+    rc=$?
+    if [ "${rc}" -eq 0 ] || grep -q '^machine_dlkm ' /proc/modules 2>/dev/null; then
+        log_line "machine_dlkm loaded after ADSP"
+        return 0
+    fi
+    log_line "machine_dlkm insmod failed rc=${rc}"
+    return 1
+}
+
+wait_for_card() {
+    attempt=0
+    while [ ! -e /dev/snd/controlC0 ] && [ "${attempt}" -lt 200 ]; do
+        attempt=$((attempt + 1))
+        if [ -e /sys/bus/platform/devices/soc:spf_core_platform:sound ]; then
+            echo "soc:spf_core_platform:sound" > /sys/bus/platform/drivers_probe 2>/dev/null || true
+        fi
+        sleep 0.1
+    done
+    [ -e /dev/snd/controlC0 ]
+}
+
+# Stock PAL's ResourceManager expects the legacy flat XML names directly
+# under /vendor/etc.  Stock Android creates those aliases at first boot; a
+# recovery ramdisk does not.  Build a read-only overlay view from the device's
+# own sku_canoe files.  Nothing is copied into the ramdisk and no UGY file is
+# used.
+prepare_vendor_mixer_compat() {
+    [ -e /vendor/etc/mixer_paths_canoe_qrd.xml ] && return 0
+    sku=/vendor/etc/audio/sku_canoe
+    [ -d "${sku}" ] || {
+        log_line "WARN missing ${sku}; PAL mixer compat skipped"
+        return 0
+    }
+    upper=/tmp/aera-vendor-etc-upper
+    work=/tmp/aera-vendor-etc-work
+    merged=/tmp/aera-vendor-etc-merged
+    mkdir -p "${upper}" "${work}" "${merged}" 2>/dev/null || return 0
+    chmod 0755 "${upper}" "${work}" "${merged}" 2>/dev/null || true
+    for name in mixer_paths_canoe_qrd.xml resourcemanager_canoe_qrd.xml \
+                plugin_manager.xml audio_module_config_primary.xml \
+                mcs_defs_canoe_qrd.xml mixer_paths_canoe_qrd_wsa884x.xml; do
+        [ -f "${sku}/${name}" ] && ln -sfn "${sku}/${name}" "${upper}/${name}" 2>/dev/null || true
+    done
+    [ -f "${sku}/mixer_paths_canoe_qrd.xml" ] && \
+        ln -sfn "${sku}/mixer_paths_canoe_qrd.xml" "${upper}/mixer_paths_canoe.xml" 2>/dev/null || true
+    [ -f "${sku}/resourcemanager_canoe_qrd.xml" ] && \
+        ln -sfn "${sku}/resourcemanager_canoe_qrd.xml" "${upper}/resourcemanager_canoe.xml" 2>/dev/null || true
+    if ! mount -t overlay overlay \
+        -o "lowerdir=/vendor/etc,upperdir=${upper},workdir=${work}" \
+        "${merged}" 2>/dev/null; then
+        log_line "WARN PAL mixer overlay mount failed"
+        return 0
+    fi
+    if ! mount -o bind "${merged}" /vendor/etc 2>/dev/null; then
+        log_line "WARN PAL mixer overlay bind failed"
+        return 0
+    fi
+    chmod 0755 /vendor/etc 2>/dev/null || true
+    log_line "PAL mixer compat overlay ready"
+}
+
+restart_adsp_via_ssr() {
+    [ -e /sys/kernel/boot_adsp/ssr ] || return 0
+    log_line "restarting ADSP after pd-mapper"
+    # The ssr sysfs write can sleep until the DSP reset completes.  Do it in a
+    # child process with a hard timeout instead of blocking the one-shot
+    # bootstrap forever.
+    ( echo 1 > /sys/kernel/boot_adsp/ssr 2>/dev/null ) &
+    ssr_pid=$!
+    attempt=0
+    while kill -0 "${ssr_pid}" 2>/dev/null && [ "${attempt}" -lt 50 ]; do
+        attempt=$((attempt + 1))
+        sleep 0.1
+    done
+    if kill -0 "${ssr_pid}" 2>/dev/null; then
+        kill -9 "${ssr_pid}" 2>/dev/null || true
+        log_line "WARN SSR write still blocked after 5s; continuing"
+    fi
+    wait "${ssr_pid}" 2>/dev/null || true
+    return 0
+}
+
+wait_for_adsp() {
+    adsp=""
+    for candidate in /sys/class/remoteproc/remoteproc*; do
+        [ -e "${candidate}/name" ] || continue
+        case "$(cat "${candidate}/name" 2>/dev/null)" in
+            *remoteproc-adsp*|*adsp*) adsp="${candidate}" ;;
+        esac
+    done
+    [ -n "${adsp}" ] || fail "ADSP remoteproc not found"
+    attempt=0
+    while [ "${attempt}" -lt 120 ]; do
+        attempt=$((attempt + 1))
+        if [ "$(cat "${adsp}/state" 2>/dev/null)" = running ] && \
+           ! dmesg 2>/dev/null | tail -40 | grep -q "q6 state is down"; then
+            log_line "ADSP ready (polls=${attempt})"
+            return 0
+        fi
+        sleep 0.1
+    done
+    log_line "WARN ADSP not fully ready after SSR"
+    return 0
 }
 
 start_service() {
@@ -172,12 +350,48 @@ start_service() {
     return 0
 }
 
-# PD mapper talks to the ADSP; bring the remoteproc up before it so the
-# service-locator handshake cannot race a powered-down DSP.
-start_adsp
+# PD mapper talks to the ADSP; start it first, then use the stock SSR path to
+# make the DSP register the audio protection domain.  Do not stop the ADSP
+# before this: that made the SSR write block on this device.
+setup_adsp_firmware
+prepare_audio_abi
 start_service aera-audio-pd-mapper required
-start_service aera-audio-adsprpcd required
-start_service aera-agm-service required
+sleep 0.5
+restart_adsp_via_ssr
+wait_for_adsp
+restore_firmware_path
 
-setprop aera.audio.ready 1
-log_line "AGM/PAL audio host ready"
+# The fastrpc nodes are root:root 0600 in recovery; the DSP daemons run as
+# media/system in the stock configuration.
+for node in /dev/fastrpc-lpass2000 /dev/fastrpc-adsp-secure; do
+    [ -e "${node}" ] && chmod 0666 "${node}" 2>/dev/null || true
+done
+
+# These are helper daemons, not hard dependencies: a missing DSP service
+# locator must not abort the one-shot bootstrap.  AGM/PAL can still come up
+# with the PD mapper path.
+start_service aera-dspservice optional
+for node in /dev/fastrpc-lpass2000 /dev/fastrpc-adsp-secure; do
+    [ -e "${node}" ] && chmod 0666 "${node}" 2>/dev/null || true
+done
+start_service aera-audio-adsprpcd optional
+start_adsp
+sleep 2
+
+load_machine_driver
+if wait_for_card; then
+    log_line "sound card $(head -n 1 /proc/asound/cards)"
+else
+    log_line "WARN machine sound card did not register"
+fi
+
+# PAL's ResourceManager needs the flat vendor XML names before the audio
+# service initializes libar-pal.so.
+prepare_vendor_mixer_compat
+
+# The AGM host is a best-effort service: its registration warning must not
+# block the PCM path.  aera-palplayer stream type 1 is the actual output path.
+start_service aera-agm-service optional
+sleep 1
+setprop aera.audio.player /system/bin/aera-palplayer
+log_line "audio bootstrap done; PCM path is aera-palplayer (stream type 1)"

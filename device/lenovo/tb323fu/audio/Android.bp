@@ -12,7 +12,6 @@ cc_binary {
     recovery: true,
     srcs: ["aera_audio_host.c"],
     shared_libs: [
-        "libbinder_ndk",
         "liblog",
         "libdl",
     ],
@@ -31,11 +30,28 @@ cc_binary {
     shared_libs: [
         "liblog",
         "libdl",
+        "libm",
     ],
     cflags: [
         "-D_GNU_SOURCE",
         "-Wall",
         "-Wextra",
         "-Werror",
+    ],
+}
+
+cc_binary {
+    name: "aera-palplayer-bin",
+    recovery: true,
+    srcs: ["aera-palplayer.c"],
+    shared_libs: [
+        "liblog",
+        "libdl",
+        "libm",
+    ],
+    cflags: [
+        "-D_GNU_SOURCE",
+        "-Wall",
+        "-Wextra",
     ],
 }

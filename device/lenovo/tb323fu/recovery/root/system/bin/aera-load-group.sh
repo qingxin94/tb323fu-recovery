@@ -8,7 +8,8 @@
 #   - the group manifest is a small list of top-level modules
 #   - dependencies are read from the real modules.dep and loaded first
 #   - every insmod uses the real path found under /vendor_dlkm or /system_dlkm
-#   - a group is never started at boot unless init explicitly starts it
+#   - the audio group starts automatically after aera-stock-mount.sh sets
+#     aera.stock.mounted=true; sys.aera.audio.load=1 remains a manual fallback
 #
 set -u
 
@@ -39,28 +40,36 @@ prop_for_group() {
 }
 
 normalize() {
-    name="${1##*/}"
-    echo "$name" | tr '-' '_' | sed 's/\.ko$//'
+    local n="${1##*/}"
+    n="${n%.ko}"
+    case "$n" in
+        *-*) n="$(echo "$n" | tr '-' '_')" ;;
+    esac
+    echo "$n"
 }
 
 is_loaded() {
-    name="$(normalize "$1")"
-    grep -q "^${name} " /proc/modules 2>/dev/null
+    local n
+    n="$(normalize "$1")"
+    grep -q "^${n} " /proc/modules 2>/dev/null
 }
 
 mark_seen() {
-    name="$(normalize "$1")"
-    grep -qx "$name" "$SEEN" 2>/dev/null || echo "$name" >> "$SEEN"
+    local n
+    n="$(normalize "$1")"
+    grep -qx "$n" "$SEEN" 2>/dev/null || echo "$n" >> "$SEEN"
 }
 
 was_seen() {
-    name="$(normalize "$1")"
-    grep -qx "$name" "$SEEN" 2>/dev/null
+    local n
+    n="$(normalize "$1")"
+    grep -qx "$n" "$SEEN" 2>/dev/null
 }
 
 # Find the actual file for a module name.  Search direct paths first, then
 # one level of versioned subdirectories, then a bounded recursive search.
 find_module_file() {
+    local wanted alt alt2 base candidate sub found
     wanted="${1##*/}"
     case "$wanted" in
         *.ko) ;;
@@ -70,7 +79,7 @@ find_module_file() {
     # spellings before giving up.
     alt="$(echo "$wanted" | tr '_' '-')"
     alt2="$(echo "$wanted" | tr '-' '_')"
-    for base in /vendor_dlkm/lib/modules /system_dlkm/lib/modules /vendor/lib/modules /lib/modules; do
+    for base in /vendor_dlkm/lib/modules /system_dlkm/lib/modules /vendor/lib/modules /system/lib/modules /lib/modules; do
         [ -d "$base" ] || continue
         for candidate in "$wanted" "$alt" "$alt2"; do
             [ -f "$base/$candidate" ] && { echo "$base/$candidate"; return 0; }
@@ -88,6 +97,7 @@ find_module_file() {
 # Find modules.dep on the real partitions.  Return its directory so relative
 # dependency paths can be resolved.
 find_dep_file() {
+    local base found
     for base in /vendor_dlkm/lib/modules /system_dlkm/lib/modules; do
         [ -d "$base" ] || continue
         [ -f "$base/modules.dep" ] && { echo "$base/modules.dep"; return 0; }
@@ -104,29 +114,54 @@ DEP_DIR=""
 # Print dependency basenames for a module, from modules.dep.
 # Pure shell: no awk dependency in recovery.
 deps_of() {
+    local want line deps dep depbase
     want="$(normalize "$1")"
     [ -n "${DEP_FILE:-}" ] && [ -f "$DEP_FILE" ] || return 0
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        path="${line%%:*}"
-        base="${path##*/}"
-        base="${base%.ko}"
-        base="$(normalize "$base")"
-        [ "$base" = "$want" ] || continue
-        deps="${line#*:}"
-        for dep in $deps; do
-            [ -n "$dep" ] || continue
-            depbase="${dep##*/}"
-            depbase="${dep%.ko}"
-            [ -n "$depbase" ] && echo "$depbase"
-        done
-    done < "$DEP_FILE" 2>/dev/null
+    # One fixed-string grep beats scanning all 400+ modules.dep lines in
+    # shell for every dependency.  The stock file has one line per module.
+    line="$(grep -F "/${want}.ko:" "$DEP_FILE" 2>/dev/null | head -n 1 || true)"
+    [ -n "$line" ] || return 0
+    deps="${line#*:}"
+    for dep in $deps; do
+        [ -n "$dep" ] || continue
+        depbase="${dep##*/}"
+        depbase="${depbase%.ko}"
+        [ -n "$depbase" ] && echo "$depbase"
+    done
+}
+
+# Dependency stack guard.  Some stock modules.dep entries contain a self
+# dependency (for example q6_pdr_dlkm -> q6_pdr_dlkm).  Without a stack guard,
+# load_one() recurses forever, aera.audio.loaded is never set, and the audio
+# bootstrap is never started.
+LOADING=""
+
+is_loading() {
+    case " ${LOADING} " in
+        *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
+
+pop_loading() {
+    local pname new item
+    pname="$1"
+    new=""
+    for item in $LOADING; do
+        [ "$item" = "$pname" ] || new="${new} ${item}"
+    done
+    LOADING="${new# }"
 }
 
 load_one() {
+    local mod name file rc dep
     mod="$1"
     name="$(normalize "$mod")"
     is_loaded "$name" && { log "already loaded: $name"; return 0; }
+    if is_loading "$name"; then
+        log "dependency cycle: $name already on stack; skip recursive load"
+        return 0
+    fi
     # Do not return success just because this module was seen earlier:
     # a previous dependency attempt may have failed, and the old short-circuit
     # silently skipped qca_cld3_peach_v2 after marking it seen.
@@ -135,9 +170,14 @@ load_one() {
 
     # Load dependencies first.  They are looked up by basename, so versioned
     # module directories and cross-partition dependencies both work.
+    LOADING="${LOADING} ${name}"
     for dep in $(deps_of "$name"); do
         load_one "$dep"
     done
+    pop_loading "$name"
+    # A dependency may have loaded the module already; avoid a duplicate
+    # insmod "File exists" storm in the log.
+    is_loaded "$name" && { log "loaded by dependency: $name"; return 0; }
 
     file="$(find_module_file "$mod" || true)"
     if [ -z "${file:-}" ]; then
@@ -157,6 +197,7 @@ load_one() {
 }
 
 load_list() {
+    local list line
     list="$1"
     [ -f "$list" ] || return 0
     while read -r line; do

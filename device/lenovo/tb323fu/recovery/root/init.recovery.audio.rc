@@ -1,12 +1,5 @@
-# TB323FU recovery audio services.
-#
-# Audio is an independent on-demand group:
-#
-#   setprop sys.aera.audio.load 1
-#
-# aera-load-group.sh loads the audio codec/machine modules from the real
-# vendor_dlkm (dependency graph from modules.dep), then aera-audio-bootstrap
-# starts the stock AGM/PAL services.  Nothing here runs at boot.
+# TB323FU recovery audio services, self-built from the ed7300d baseline.
+# No UGY binaries, libs or scripts are used here.
 
 service aera-audio-modules /system/bin/sh /system/bin/aera-load-group.sh audio
     class core
@@ -16,18 +9,45 @@ service aera-audio-modules /system/bin/sh /system/bin/aera-load-group.sh audio
     disabled
     seclabel u:r:recovery:s0
 
-on property:sys.aera.audio.load=1
-    setprop sys.aera.audio.load 0
+on property:twrp.module.handler_done=true
+    write /sys/fs/selinux/enforce 0
+    # AERA browser jail needs these two cgroup roots for every isolated
+    # browser/media task.  /dev is a devtmpfs and is recreated on every boot,
+    # so they must be mounted here instead of being created by hand.
+    mkdir /dev/cg2_bpf 0755 root root
+    mkdir /dev/memcg 0755 root root
+    mount cgroup2 none /dev/cg2_bpf
+    mount cgroup none /dev/memcg memory
+    # One long-lived bridge owns the stock PAL stream.  AERA Media reconnects
+    # its PCM sink per track; recreating the bridge/player per track leaks PAL
+    # low-latency streams and the fourth track stalls the playbin clock.
+    start aera-audio-bridge
     start aera-audio-modules
 
 on property:aera.audio.loaded=true
     start aera-audio-bootstrap
+
+service aera-audio-bridge /system/bin/aera-audio-bridge --browser-audio
+    class core
+    disabled
+    user root
+    group root system audio media wakelock
+    seclabel u:r:recovery:s0
 
 service aera-audio-pd-mapper /mnt/aera-stock/vendor/bin/pd-mapper
     class core
     disabled
     user root
     group root system
+    seclabel u:r:recovery:s0
+    setenv LD_LIBRARY_PATH /mnt/aera-stock/vendor/lib64:/vendor/lib64:/system/lib64
+
+service aera-dspservice /mnt/aera-stock/vendor/bin/dspservice
+    class hal
+    disabled
+    user system
+    group system wakelock
+    capabilities BLOCK_SUSPEND
     seclabel u:r:recovery:s0
     setenv LD_LIBRARY_PATH /mnt/aera-stock/vendor/lib64:/vendor/lib64:/system/lib64
 
@@ -41,15 +61,31 @@ service aera-audio-adsprpcd /mnt/aera-stock/vendor/bin/audioadsprpcd audiopd ads
     setenv DSP_LIBRARY_PATH /vendor/lib/rfsa/adsp
     setenv ADSP_LIBRARY_PATH /vendor/lib/rfsa/adsp
 
+service aera-vndservicemanager /vendor/bin/vndservicemanager /dev/vndbinder
+    class core
+    disabled
+    user root
+    group root readproc
+    writepid /dev/cpuset/system-background/tasks
+    seclabel u:r:recovery:s0
+    # /vendor first is mandatory: this is the stock vendor-domain libbinder.
+    setenv LD_LIBRARY_PATH /vendor/lib64:/system/lib64
+
 service aera-agm-service /system/bin/aera-audio-service /mnt/aera-stock/vendor
     class main
     disabled
     user root
     group root system audio media wakelock
     seclabel u:r:recovery:s0
-    setenv LD_LIBRARY_PATH /mnt/aera-stock/vendor/lib64:/vendor/lib64:/system/lib64
+    # /vendor first: use the device's vendor-domain libbinder.so.  The stock
+    # AGM/PAL libraries are vendor binaries and must share that binder domain.
+    # libbinder_ndk.so is absent from /vendor; /tmp carries the exact stock
+    # A16 NDK shipped in this ramdisk, not the recovery AOSP NDK.
+    setenv LD_LIBRARY_PATH /mnt/aera-stock/vendor/lib64:/tmp/aera-audio-abi:/vendor/lib64:/system/lib64
     setenv ANDROID_ROOT /system
     setenv ANDROID_DATA /data
+    interface aidl vendor.qti.hardware.agm.IAGM/default
+    interface aidl vendor.qti.hardware.pal.IPAL/default
 
 service aera-audio-bootstrap /system/bin/aera-audio-bootstrap
     class core

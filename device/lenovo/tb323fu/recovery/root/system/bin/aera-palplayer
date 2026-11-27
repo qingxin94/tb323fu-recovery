@@ -1,0 +1,7 @@
+#!/system/bin/sh
+# Keep the vendor-domain binder and the stock PAL libraries ahead of the
+# recovery system runtime.  This must happen before the ELF loader starts
+# aera-palplayer-bin; setting LD_LIBRARY_PATH inside the binary is too late
+# for dlopen.
+export LD_LIBRARY_PATH=/mnt/aera-stock/vendor/lib64:/tmp/aera-audio-abi:/vendor/lib64:/system/lib64
+exec /system/bin/aera-palplayer-bin "$@"

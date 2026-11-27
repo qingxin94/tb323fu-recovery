@@ -1,0 +1,17 @@
+# Do not start the recovery system-domain vndservicemanager at init.
+# It links /system/lib64/libbinder.so and speaks SYST parcels.  The stock
+# AGM/PAL vendor libraries speak VNDR and get BAD_TYPE from this manager.
+# Start the stock A16 /vendor/bin/vndservicemanager only after the real
+# vendor partition is mounted; it links /vendor/lib64/libbinder.so.
+on property:aera.stock.mounted=true
+    start aera-vndservicemanager
+
+# Kept as a fallback only; aera-vnd-switch.sh starts it if the stock one
+# cannot start.  It is deliberately not started on init.
+service vndservicemanager /system/bin/vndservicemanager /dev/vndbinder
+    disabled
+    user root
+    group root readproc
+    writepid /dev/cpuset/system-background/tasks
+    shutdown critical
+    seclabel u:r:recovery:s0

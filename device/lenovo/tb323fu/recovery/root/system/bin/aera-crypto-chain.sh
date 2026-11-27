@@ -47,6 +47,10 @@ chmod 0660 /mnt/vendor/spunvm 2>/dev/null || true
 # TWRP/base both restore labels on persist before SPU NVM access.
 restorecon -R /persist /mnt/vendor/persist 2>/dev/null || true
 
+# v18: switch to the stock A16 vendor-domain binder context manager before
+# any vendor HAL (keymint/weaver/spu) registers a service.
+/system/bin/aera-vnd-switch.sh
+
 # v11: device VINTF fragment overlay (framework manifest must stay valid).
 /system/bin/aera-vintf-overlay.sh
 

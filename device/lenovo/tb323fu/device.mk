@@ -18,6 +18,7 @@ PRODUCT_USE_DYNAMIC_PARTITIONS := true
 PRODUCT_PACKAGES += \
     aera-audio-bridge \
     aera-audio-service \
+    aera-palplayer-bin \
     aera-browser-jail \
     lpflash \
     lpmake \
